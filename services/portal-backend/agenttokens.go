@@ -20,6 +20,9 @@ type agentToken struct {
 	CreatedBy string `json:"created_by"`
 	CreatedAt string `json:"created_at"`
 	Revoked   bool   `json:"revoked"`
+	Kind      string `json:"kind,omitempty"` // agent（正式）/ enroll（一次性注册，30 分钟）
+	ExpiresAt string `json:"expires_at,omitempty"`
+	Used      bool   `json:"used,omitempty"`
 }
 
 type tokenStore struct {
@@ -42,6 +45,12 @@ func loadTokens() (*tokenStore, error) {
 	}
 	if s.Tokens == nil {
 		s.Tokens = []agentToken{}
+	}
+	// 旧库存量正式 token 无 kind 字段，默认 agent
+	for i := range s.Tokens {
+		if s.Tokens[i].Kind == "" {
+			s.Tokens[i].Kind = "agent"
+		}
 	}
 	return s, nil
 }
@@ -94,7 +103,7 @@ func validAgentToken(plain string) (string, bool) {
 	}
 	h := sha256Hex(plain)
 	for _, t := range s.Tokens {
-		if !t.Revoked && constantTimeEqual(t.Hash, h) {
+		if !t.Revoked && t.Kind != "enroll" && constantTimeEqual(t.Hash, h) {
 			return t.AgentID, true
 		}
 	}

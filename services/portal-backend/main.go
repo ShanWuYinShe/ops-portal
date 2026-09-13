@@ -187,6 +187,10 @@ func main() {
 	// 审计（admin）
 	mux.HandleFunc("GET /api/portal/audit", requireRole("ops.admin", apiAuditList))
 
+	// 注册令牌（admin 签发）与 agent 自助注册
+	mux.HandleFunc("POST /api/portal/agent-tokens/enroll-token", requireRole("ops.admin", apiAgentEnrollTokenIssue))
+	mux.HandleFunc("POST /api/agent/enroll", apiAgentEnroll)
+
 	// agent 树（token 鉴权）
 	mux.HandleFunc("POST /api/agent/heartbeat", requireAgentTokenV2(apiAgentHeartbeat))
 	mux.HandleFunc("POST /api/agent/report", requireAgentTokenV2(apiAgentReport))

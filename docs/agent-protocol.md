@@ -20,6 +20,23 @@
   一次性显示、可吊销，portal 只存 SHA-256 摘要。**一机一 token，泄露单吊即断。**
 - 整条链路在 portal 的 mTLS 体系之后（边缘验证设备证书 + Origin Pulls），
   agent 侧无需客户端证书（token 即凭证），人访问 portal 才需要设备证书。
+边缘 WAF 规则对 `/api/agent/*` 路径豁免 mTLS（agent 有独立 token 鉴权），
+其余路径无证书一律边缘拦截。
+
+## 注册（enrollment，免人工复制 token）
+
+portal「Agent 令牌」页签发**一次性注册令牌**（`enroll_` 前缀，绑定 agent_id、
+30 分钟有效、单次使用）→ 被管机自助换取正式 token：
+
+```
+POST /api/agent/enroll
+{"enroll_token": "enroll_...", "agent_id": "agent-xxx-01"}
+→ {"ok": true, "token": "opsa_..."}
+```
+
+agent 亦支持启动时自注册：设 `AGENT_ENROLL_TOKEN`（留空 `AGENT_TOKEN`），
+首次启动自动完成上述交换。一键接入：`scripts/onboard-agent.sh`（在被管机的
+仓库 checkout 内执行，生成 compose、注册、构建、启动一步完成）。
 
 ## 端点
 
@@ -83,17 +100,33 @@ agent 侧双重白名单：`AGENT_COMPOSE_PROJECTS`（项目）+ `AGENT_DEPLOY_D
 （源 == 目标，如 `- /srv/hotspot:/srv/hotspot:ro`）。原因：compose CLI 在 agent
 容器内执行，`-f` 与相对卷按容器内路径解析后再交 daemon；同路径挂载保证两侧一致。
 
-## 站点接入清单（onboarding）
+## 接入清单（onboarding）
+
+### 新机器（首次）
+
+1. 机器上 checkout ops-portal 仓库（远程仓库建好后 `git clone` 即可）。
+2. portal「Agent 令牌」页签发注册令牌（填 agent_id，如 `agent-<机器名>-01`）。
+3. 跑 `scripts/onboard-agent.sh`（参数：--portal --agent-id --enroll-token
+   --project/--site/--deploy 可多次，--local 仅限与 portal 同宿主机）。
+4. portal「站点与服务」页确认心跳出现。完成。
+
+### 已接入机器上新增站点
 
 1. 站点 docker-compose 化，服务有 healthcheck。
-2. 被管机起 agent（见 `agent-compose.yml`）：配 `AGENT_ID`、portal 签发的
-   `AGENT_TOKEN`、项目白名单、站点目录与 deploy 目录（同路径挂载）。
-3. portal「Token 页」签发 token → 填入 agent env → 心跳出现在「站点页」。
-4. **敏感操作子域名**（可选，站点自带管理界面时）：子域名加进
-   `OPS_DOMAINS`（`pki/cf_edge_setup.py` 自动合并主机关联与透传规则），
-   CF 主机关联启用 mTLS，源站同样接 X-Cert-* 头查表——
-   保证所有站点的敏感操作只有持证用户可访问。
-5. 备份：站点数据卷纳入备份 runbook。
+2. 编辑该机 `agent-compose.generated.yml`：项目白名单加项目名、
+   AGENT_SITES/AGENT_DEPLOY_DIRS 加 `project:/宿主机绝对路径`、
+   volumes 加同路径只读挂载 → `docker compose up -d`。
+3. portal「站点」页 10 秒内出现新容器。完成。
+
+### 敏感操作子域名（站点自带管理界面时，可选）
+
+子域名加进 `OPS_DOMAINS`（`pki/cf_edge_setup.py` 自动合并主机关联、
+透传与 WAF 规则），源站同样接 X-Cert-* 头查表——保证所有站点的敏感操作
+只有持证用户可访问。执行须在 portal 服务器上（token 有 IP 白名单）。
+
+### 其他
+
+- 备份：站点数据卷纳入备份 runbook。
 
 ## 版本演进
 

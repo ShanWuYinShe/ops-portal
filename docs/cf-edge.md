@@ -39,7 +39,8 @@
 直接拦截（实测返回 CF "Attention Required" 拦截页，不再到达源站）：
 
 ```text
-(http.host in {"ops.yinghuoren.com"} and (
+(http.host in {"ops.yinghuoren.com"} and
+  not starts_with(http.request.uri.path, "/api/agent/") and (
   not cf.tls_client_auth.cert_verified
   or cf.tls_client_auth.cert_revoked
   or cf.tls_client_auth.cert_issuer_ski ne "F275E69E4459913F80F4D9A36BA5AE9129C721C6"))
@@ -49,6 +50,8 @@
 - SKI 条件必须用 `ne` 放在 or 链里——无证请求的 issuer_ski 是空串，
   写成 `and ... eq "SKI"` 会恒假导致无证请求不匹配、规则失效。
 - SKI 用**大写**（CF 官方示例格式），小写会导致有效证书被误拦。
+- `/api/agent/*` 豁免边缘 mTLS：agent 无设备证书、以独立 bearer token 鉴权
+  （一次性 enroll 换证），不豁免会让外连 agent 在边缘被拦（实测踩坑）。
 - 发卡方 SKI 取自证书 Authority Key Identifier（非 CF API 返回的叶子 `ski` 字段）。
 
 ## 日常运维
