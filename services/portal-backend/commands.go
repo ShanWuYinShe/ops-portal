@@ -9,17 +9,20 @@ import (
 )
 
 // 命令队列：portal 入队 → agent 心跳取走 → agent 本地执行 → 下次心跳回传结果。
-// 白名单动作：start / stop / restart（容器名=compose service 名）。
+// 白名单动作：start / stop / restart（容器名=compose service 名）；
+// deploy（按 compose 项目重建受影响服务，project+targets）。
 
 type portalCommand struct {
-	ID        string `json:"id"`
-	AgentID   string `json:"agent_id"`
-	Action    string `json:"action"` // start / stop / restart
-	Service   string `json:"service"`
-	Status    string `json:"status"` // queued / acked / done / failed
-	CreatedBy string `json:"created_by"`
-	CreatedAt string `json:"created_at"`
-	Result    string `json:"result"`
+	ID        string   `json:"id"`
+	AgentID   string   `json:"agent_id"`
+	Action    string   `json:"action"` // start / stop / restart / deploy
+	Service   string   `json:"service"`
+	Project   string   `json:"project"`
+	Targets   []string `json:"targets"`
+	Status    string   `json:"status"` // queued / acked / done / failed
+	CreatedBy string   `json:"created_by"`
+	CreatedAt string   `json:"created_at"`
+	Result    string   `json:"result"`
 }
 
 type commandStore struct {
@@ -50,14 +53,21 @@ func saveCommands(s *commandStore) error {
 	return atomicWriteJSON(commandsPath(), s, 0600)
 }
 
-var validActions = map[string]bool{"start": true, "stop": true, "restart": true}
+var validActions = map[string]bool{"start": true, "stop": true, "restart": true, "deploy": true}
 
 func enqueueCommand(cmd portalCommand) (*portalCommand, error) {
 	if !validActions[cmd.Action] {
 		return nil, errors.New("invalid action")
 	}
-	if cmd.Service == "" || cmd.AgentID == "" {
-		return nil, errors.New("agent_id and service required")
+	if cmd.AgentID == "" {
+		return nil, errors.New("agent_id required")
+	}
+	if cmd.Action == "deploy" {
+		if cmd.Project == "" || len(cmd.Targets) == 0 {
+			return nil, errors.New("deploy requires project and targets")
+		}
+	} else if cmd.Service == "" {
+		return nil, errors.New("service required")
 	}
 	commandsMu.Lock()
 	defer commandsMu.Unlock()

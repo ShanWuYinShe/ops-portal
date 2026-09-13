@@ -20,10 +20,12 @@ import (
 // 与 workwork 的 apiServiceAction 模式一致。
 
 type inboundCommand struct {
-	ID      string `json:"id"`
-	AgentID string `json:"agent_id"`
-	Action  string `json:"action"`
-	Service string `json:"service"`
+	ID      string   `json:"id"`
+	AgentID string   `json:"agent_id"`
+	Action  string   `json:"action"` // start / stop / restart / deploy
+	Service string   `json:"service"`
+	Project string   `json:"project"` // deploy 用：compose 项目名
+	Targets []string `json:"targets"` // deploy 用：受影响服务列表
 }
 
 type reportItem struct {
@@ -75,9 +77,13 @@ func isSelfTarget(ctx context.Context, cli *client.Client, service string, proje
 	return strings.HasPrefix(hostname, short)
 }
 
-func execCommand(ctx context.Context, cli *client.Client, cmd inboundCommand, projects []string) reportItem {
+func execCommand(ctx context.Context, cli *client.Client, cmd inboundCommand, projects []string, deployDirs map[string]string) reportItem {
 	switch cmd.Action {
 	case "start", "stop", "restart":
+	case "deploy":
+		rep := runDeploy(ctx, deployDirs, projects, deploySpec{Project: cmd.Project, Services: cmd.Targets})
+		rep.ID = cmd.ID
+		return rep
 	default:
 		return reportItem{ID: cmd.ID, Status: "failed", Result: "invalid action"}
 	}
@@ -107,6 +113,28 @@ func postReport(ctx context.Context, portalURL, token, agentID string, reps []re
 	if err != nil {
 		return err
 	}
+	// deploy/restart 会重建 backend，回传时对方可能正在重启：退避重试。
+	backoffs := []time.Duration{5 * time.Second, 15 * time.Second, 30 * time.Second}
+	var lastErr error
+	for i := 0; i <= len(backoffs); i++ {
+		if i > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(backoffs[i-1]):
+			}
+		}
+		if err := postReportOnce(ctx, portalURL, token, body); err != nil {
+			lastErr = err
+			log.Printf("agent: report attempt %d failed: %v", i+1, err)
+			continue
+		}
+		return nil
+	}
+	return lastErr
+}
+
+func postReportOnce(ctx context.Context, portalURL, token string, body []byte) error {
 	opCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(opCtx, http.MethodPost,
@@ -127,7 +155,7 @@ func postReport(ctx context.Context, portalURL, token, agentID string, reps []re
 	return nil
 }
 
-func drainCommands(ctx context.Context, cli *client.Client, portalURL, token, agentID string, cmds []inboundCommand, projects []string) {
+func drainCommands(ctx context.Context, cli *client.Client, portalURL, token, agentID string, cmds []inboundCommand, projects []string, deployDirs map[string]string) {
 	if len(cmds) == 0 {
 		return
 	}
@@ -137,14 +165,14 @@ func drainCommands(ctx context.Context, cli *client.Client, portalURL, token, ag
 		log.Printf("agent: %s %s (%s)", c.Action, c.Service, c.ID)
 		// 目标容器就是 agent 自己时（hostname 即容器短 ID），restart/stop
 		// 会杀掉本进程：先回传"即将执行"，结果由下次心跳的容器状态体现
-		// （Up 时间重置即成功）。判断依据：目标 ID 以 hostname 开头。
-		if isSelfTarget(ctx, cli, c.Service, projects, hostname) {
+		// （Up 时间重置即成功）。deploy 不杀自己，无需预回传。
+		if (c.Action == "restart" || c.Action == "stop") && isSelfTarget(ctx, cli, c.Service, projects, hostname) {
 			rep := reportItem{ID: c.ID, Status: "done", Result: c.Action + " self: reported before exec, verify by container uptime"}
 			if err := postReport(ctx, portalURL, token, agentID, []reportItem{rep}); err != nil {
 				log.Printf("agent: report %s failed: %v", c.ID, err)
 			}
 		}
-		rep := execCommand(ctx, cli, c, projects)
+		rep := execCommand(ctx, cli, c, projects, deployDirs)
 		// 逐条立即回传：批量回传在自操作场景下永远发不出去。
 		if err := postReport(ctx, portalURL, token, agentID, []reportItem{rep}); err != nil {
 			log.Printf("agent: report %s failed: %v", c.ID, err)

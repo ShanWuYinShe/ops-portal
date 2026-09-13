@@ -20,8 +20,9 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o ops-agent .
 FROM alpine:${ALPINE_VERSION}
 
 RUN sed -i 's#dl-cdn.alpinelinux.org#mirrors.aliyun.com#g' /etc/apk/repositories \
-    && apk add --no-cache ca-certificates git \
-    && adduser -D -u 1001 appuser
+    && apk add --no-cache ca-certificates git docker-cli docker-cli-compose \
+    && adduser -D -u 1001 appuser \
+    && docker compose version
 
 COPY --from=go-builder /build/ops-agent /app/ops-agent
 

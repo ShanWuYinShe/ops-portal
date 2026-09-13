@@ -154,26 +154,36 @@ func apiCommandsEnqueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		AgentID string `json:"agent_id"`
-		Action  string `json:"action"`
-		Service string `json:"service"`
+		AgentID string   `json:"agent_id"`
+		Action  string   `json:"action"`
+		Service string   `json:"service"`
+		Project string   `json:"project"`
+		Targets []string `json:"targets"`
 	}
 	if !decodeBody(w, r, &body) {
 		return
 	}
 	u := actorOf(r)
+	var targets []string
+	for _, t := range body.Targets {
+		if t = strings.TrimSpace(t); t != "" {
+			targets = append(targets, t)
+		}
+	}
 	cmd, err := enqueueCommand(portalCommand{
 		AgentID:   strings.TrimSpace(body.AgentID),
 		Action:    strings.TrimSpace(body.Action),
 		Service:   strings.TrimSpace(body.Service),
+		Project:   strings.TrimSpace(body.Project),
+		Targets:   targets,
 		CreatedBy: u.Username,
 	})
 	if err != nil {
-		audit(u.Username, "", "commands.enqueue", body.AgentID+"/"+body.Service, "fail", err.Error(), r.RemoteAddr)
+		audit(u.Username, "", "commands.enqueue", body.AgentID+"/"+body.Service+body.Project, "fail", err.Error(), r.RemoteAddr)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	audit(u.Username, "", "commands.enqueue", cmd.ID, "ok", body.Action+" "+body.Service, r.RemoteAddr)
+	audit(u.Username, "", "commands.enqueue", cmd.ID, "ok", body.Action+" "+body.Service+body.Project, r.RemoteAddr)
 	writeOK(w, map[string]any{"command": cmd})
 }
 

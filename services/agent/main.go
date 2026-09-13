@@ -65,6 +65,7 @@ func main() {
 	token := getEnv("AGENT_TOKEN", "")
 	projects := splitCSV(getEnv("AGENT_COMPOSE_PROJECTS", ""))
 	sitesSpec := getEnv("AGENT_SITES", "")
+	deployDirs := parseDeployDirs(getEnv("AGENT_DEPLOY_DIRS", ""))
 	interval := getEnv("HEARTBEAT_INTERVAL", "10s")
 	dur, err := time.ParseDuration(interval)
 	if err != nil || dur <= 0 {
@@ -105,7 +106,7 @@ func main() {
 		if err != nil {
 			log.Printf("heartbeat: post failed: %v", err)
 		} else {
-			drainCommands(ctx, cli, portalURL, token, agentID, cmds, projects)
+			drainCommands(ctx, cli, portalURL, token, agentID, cmds, projects, deployDirs)
 		}
 		<-tick.C
 	}

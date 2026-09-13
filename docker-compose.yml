@@ -121,9 +121,12 @@ services:
       - PORTAL_URL=${PORTAL_URL:-http://portal-backend:8319}
       - AGENT_COMPOSE_PROJECTS=${AGENT_COMPOSE_PROJECTS:-ops-portal}
       - AGENT_SITES=${AGENT_SITES:-}
+      - AGENT_DEPLOY_DIRS=${AGENT_DEPLOY_DIRS:-}
       - HEARTBEAT_INTERVAL=5s
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      # deploy 需要的站点目录由各机部署文件另行挂载（见 .env.example
+      # AGENT_DEPLOY_DIRS）；主文件不硬编码宿主机路径。
     depends_on:
       portal-backend:
         condition: service_healthy
