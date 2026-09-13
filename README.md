@@ -8,6 +8,10 @@
 边缘（Cloudflare）验人，源站认账；被管机跑 `ops-agent` 主动外连 portal，
 portal 永不直连被管机。详见 `docs/cf-edge.md`。
 
+**网站是一等实体**：agent 心跳的 compose 项目与原生注册的网站汇入同一视图
+（`GET /api/portal/sites`），UI 一律按网站分组展示与操作，详见
+`docs/agent-protocol.md` 的「统一网站视图」。
+
 ## 本地联调
 
 ```bash

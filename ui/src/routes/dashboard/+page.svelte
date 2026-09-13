@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { api, type CertRecord, type PortalCommand } from '$lib/api';
-	import { agentOnline, badgeCls, badgeOf, portal, relTime } from '$lib/state.svelte';
+	import { agentOnline, badgeCls, portal, relTime } from '$lib/state.svelte';
 
 	let certs = $state<CertRecord[]>([]);
 	let commands = $state<PortalCommand[]>([]);
@@ -10,6 +10,7 @@
 	const running = $derived(containers.filter((c) => c.state === 'running'));
 	const pending = $derived(commands.filter((c) => c.status === 'queued' || c.status === 'acked'));
 	const activeCerts = $derived(certs.filter((c) => c.status === 'active'));
+	const sitesWithRuntime = $derived(portal.sites.filter((s) => s.containers.length > 0));
 
 	$effect(() => {
 		const load = async () => {
@@ -41,6 +42,13 @@
 
 <div class="mb-4.5 grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3.5">
 	<div class="card p-4">
+		<div class="text-xs text-ink-muted">网站</div>
+		<div class="mt-0.5 text-2xl font-bold">
+			{sitesWithRuntime.length}<span class="text-sm text-ink-muted"> / {portal.sites.length}</span>
+		</div>
+		<div class="mt-0.5 text-xs text-ink-2">有运行实例 / 已接入</div>
+	</div>
+	<div class="card p-4">
 		<div class="text-xs text-ink-muted">Agent 在线</div>
 		<div class="mt-0.5 text-2xl font-bold">
 			{online.length}<span class="text-sm text-ink-muted"> / {portal.agents.length}</span>
@@ -67,35 +75,38 @@
 </div>
 
 <div class="card">
-	{#if portal.agents.length === 0}
+	{#if portal.sites.length === 0}
 		<div class="card-body">
 			<div class="p-8 text-center text-[13px] text-ink-muted">
-				暂无 agent 接入。按 docs/agent-protocol.md 在被管机起 agent 即可接入。
+				暂无网站接入。按 docs/agent-protocol.md 在被管机起 agent 或注册原生接口即可接入。
 			</div>
 		</div>
 	{:else}
 		<table class="table">
 			<thead>
-				<tr><th>Agent</th><th>主机</th><th>状态</th><th>上次心跳</th><th>容器</th><th>Compose 项目</th></tr>
+				<tr><th>网站</th><th>来源</th><th>部署机器</th><th>容器</th><th>版本</th><th>ops 接口</th></tr>
 			</thead>
 			<tbody>
-				{#each portal.agents as a (a.agent_id)}
+				{#each portal.sites as s (s.name)}
 					<tr>
-						<td class="font-mono">{a.agent_id}</td>
-						<td>{a.heartbeat?.hostname || '—'}</td>
+						<td><b>{s.name}</b></td>
+						<td class="text-ink-2">{s.source === 'native' ? '原生注册' : s.source === 'both' ? 'agent + 原生' : 'agent'}</td>
 						<td>
-							<span class="badge {badgeCls(agentOnline(a.last_seen) ? 'ok' : 'err')}">
-								{agentOnline(a.last_seen) ? '在线' : '离线'}
-							</span>
-						</td>
-						<td>{relTime(a.last_seen)}</td>
-						<td>
-							{(a.heartbeat?.containers ?? []).filter((c) => c.state === 'running').length}
-							运行 / {(a.heartbeat?.containers ?? []).length} 总数
+							{#each s.agents as a (a.agent_id)}
+								<span class="badge mr-1 {badgeCls(a.online ? 'ok' : 'err')}">{a.agent_id}</span>
+							{/each}
 						</td>
 						<td>
-							{#each a.heartbeat?.compose_projects ?? [] as p (p)}<span class="chip">{p}</span>{/each}
+							{s.containers.filter((c) => c.state === 'running').length} 运行 / {s.containers.length} 总数
 						</td>
+						<td>
+							{#each s.git as g (g.agent_id + g.name)}
+								<span class="font-mono text-[12.5px] text-ink-2">
+									<span class="badge mr-1 {badgeCls(g.dirty ? 'warn' : 'ok')}">{g.branch}</span>@{g.head?.slice(0, 10)}
+								</span>
+							{/each}
+						</td>
+						<td class="font-mono text-xs text-ink-2">{s.ops_url || '—'}</td>
 					</tr>
 				{/each}
 			</tbody>
@@ -105,20 +116,23 @@
 
 <div class="card mt-4.5">
 	<div class="card-head">
-		<h2 class="text-base font-semibold">站点版本</h2>
-		<span class="text-xs text-ink-muted">来自各 agent 的 AGENT_SITES 上报</span>
+		<h2 class="text-base font-semibold">Agent 主机</h2>
+		<span class="text-xs text-ink-muted">心跳来源</span>
 	</div>
 	<div class="card-body">
-		{#each portal.agents as a (a.agent_id)}
-			{#each a.heartbeat?.sites ?? [] as s (a.agent_id + s.name)}
+		{#if portal.agents.length === 0}
+			<div class="text-center text-[13px] text-ink-muted">暂无 agent 接入</div>
+		{:else}
+			{#each portal.agents as a (a.agent_id)}
 				<div class="flex items-center gap-2.5 py-1">
-					<span class="badge {badgeCls(s.dirty ? 'warn' : 'ok')}">{s.name}</span>
-					<span class="font-mono text-[12.5px] text-ink-2">{s.branch}@{s.head?.slice(0, 10)}</span>
-					{#if s.dirty}<span class="text-xs text-ink-muted">有未提交改动</span>{/if}
+					<span class="badge {badgeCls(agentOnline(a.last_seen) ? 'ok' : 'err')}">
+						{agentOnline(a.last_seen) ? '在线' : '离线'}
+					</span>
+					<span class="font-mono text-[13px]">{a.agent_id}</span>
+					<span class="text-xs text-ink-2">{a.heartbeat?.hostname}</span>
+					<span class="text-xs text-ink-muted">{relTime(a.last_seen)}</span>
 				</div>
-			{:else}
-				<div class="text-center text-[13px] text-ink-muted">暂无站点版本上报</div>
 			{/each}
-		{/each}
+		{/if}
 	</div>
 </div>

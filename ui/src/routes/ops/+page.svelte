@@ -1,13 +1,22 @@
 <script lang="ts">
-	import { api, type PortalCommand } from '$lib/api';
+	import { api, type PortalCommand, type SiteOverview } from '$lib/api';
 	import { badgeCls, badgeOf, portal, roleLevel, shortTime } from '$lib/state.svelte';
 	import { askConfirm, toast } from '$lib/dialogs.svelte';
 
 	let commands = $state<PortalCommand[]>([]);
-	let form = $state({ agent_id: '', action: 'restart', service: '' });
-	let deploy = $state({ agent_id: '', project: '', targets: '' });
+	// 一切操作以网站为起点：选网站 → 自动带出机器/compose 项目/服务。
+	let svcSite = $state('');
+	let svcTarget = $state(''); // `${agent_id}|${service}`
+	let svcAction = $state<'start' | 'stop' | 'restart'>('restart');
+	let deploySite = $state('');
+	let deployAgent = $state('');
+	let deployTargets = $state('');
 
 	const canOperate = $derived(roleLevel(portal.whoami?.role) >= 2);
+	const operableSites = $derived(portal.sites.filter((s) => s.containers.length > 0));
+
+	const svcSiteObj = $derived(portal.sites.find((s) => s.name === svcSite));
+	const deploySiteObj = $derived(portal.sites.find((s) => s.name === deploySite));
 
 	$effect(() => {
 		const load = async () => {
@@ -23,6 +32,19 @@
 			if (!document.hidden) load();
 		}, 8000);
 		return () => clearInterval(t);
+	});
+
+	// 网站列表刷新后，已选目标可能已不存在，清掉失效选择。
+	$effect(() => {
+		if (svcSite && !svcSiteObj) {
+			svcSite = '';
+			svcTarget = '';
+		}
+		if (deploySite && !deploySiteObj) {
+			deploySite = '';
+			deployAgent = '';
+			deployTargets = '';
+		}
 	});
 
 	async function enqueue(
@@ -46,47 +68,53 @@
 	}
 
 	async function submitService() {
-		if (!form.agent_id || !form.service) {
-			toast('agent 与服务名必填', 'err');
+		const [agentId, service] = svcTarget.split('|');
+		if (!agentId || !service) {
+			toast('先选择网站和服务', 'err');
 			return;
 		}
-		const verb = { start: '启动', stop: '停止', restart: '重启' }[form.action] ?? form.action;
+		const verb = { start: '启动', stop: '停止', restart: '重启' }[svcAction];
 		const ok = await enqueue(
-			{ agent_id: form.agent_id, action: form.action, service: form.service.trim() },
+			{ agent_id: agentId, action: svcAction, service },
 			`${verb}服务`,
-			`${form.agent_id} → ${verb} ${form.service}`,
-			form.action !== 'start'
+			`${agentId} → ${verb} ${service}`,
+			svcAction !== 'start'
 		);
-		if (ok) form.service = '';
+		if (ok) svcTarget = '';
 	}
 
 	async function submitDeploy() {
-		const targets = deploy.targets
+		const targets = deployTargets
 			.split(',')
 			.map((s) => s.trim())
 			.filter(Boolean);
-		if (!deploy.agent_id || !deploy.project || targets.length === 0) {
-			toast('agent、project、服务列表均必填', 'err');
+		if (!deploySite || !deployAgent || targets.length === 0) {
+			toast('网站、机器、服务列表均必填', 'err');
 			return;
 		}
 		const ok = await enqueue(
 			{
-				agent_id: deploy.agent_id,
+				agent_id: deployAgent,
 				action: 'deploy',
-				project: deploy.project.trim(),
+				project: deploySite, // compose 项目名即网站名
 				targets
 			},
 			'发布重建',
-			`在 ${deploy.agent_id} 重建 ${deploy.project} 的 [${targets.join(', ')}]。\n只重建受影响服务；构建日志可在命令历史中查看。`,
+			`在 ${deployAgent} 重建 ${deploySite} 的 [${targets.join(', ')}]。\n只重建受影响服务；构建日志可在命令历史中查看。`,
 			true
 		);
-		if (ok) deploy.targets = '';
+		if (ok) deployTargets = '';
+	}
+
+	function labelOf(site: SiteOverview): string {
+		const agent = site.agents.map((a) => a.agent_id).join(', ');
+		return `${site.name}${agent ? `（${agent}）` : ''}`;
 	}
 </script>
 
 <div class="mb-4.5">
 	<h1 class="page-title">命令与发布</h1>
-	<div class="page-sub">容器操作与按变更重建 · 命令历史每 8 秒刷新</div>
+	<div class="page-sub">按网站选择目标 · 命令历史每 8 秒刷新</div>
 </div>
 
 {#if canOperate}
@@ -95,45 +123,56 @@
 			<div class="text-xs text-ink-muted">容器快捷操作</div>
 			<div class="mt-2.5 flex flex-wrap items-end gap-2.5">
 				<div class="field">
-					<label>Agent</label>
-					<select class="input" bind:value={form.agent_id}>
+					<label for="f-svcSite">网站</label>
+					<select id="f-svcSite" class="input" bind:value={svcSite}>
 						<option value="">选择</option>
-						{#each portal.agents as a (a.agent_id)}<option value={a.agent_id}>{a.agent_id}</option>{/each}
+						{#each operableSites as s (s.name)}<option value={s.name}>{labelOf(s)}</option>{/each}
 					</select>
 				</div>
 				<div class="field min-w-25 flex-none">
-					<label>动作</label>
-					<select class="input" bind:value={form.action}>
+					<label for="f-svcAction">动作</label>
+					<select id="f-svcAction" class="input" bind:value={svcAction}>
 						<option value="restart">重启</option>
 						<option value="start">启动</option>
 						<option value="stop">停止</option>
 					</select>
 				</div>
 				<div class="field">
-					<label>Compose 服务名</label>
-					<input class="input" placeholder="如 nginx" bind:value={form.service}
-						onkeydown={(e) => e.key === 'Enter' && submitService()} />
+					<label for="f-svcTarget">服务</label>
+					<select id="f-svcTarget" class="input" bind:value={svcTarget} disabled={!svcSiteObj}>
+						<option value="">选择</option>
+						{#each (svcSiteObj?.containers ?? []) as c (c.agent_id + c.id)}
+							<option value="{c.agent_id}|{c.service}">
+								{c.service}{svcSiteObj && svcSiteObj.agents.length > 1 ? ` @ ${c.agent_id}` : ''}
+							</option>
+						{/each}
+					</select>
 				</div>
-				<button class="btn btn-primary" onclick={submitService}>下发</button>
+				<button class="btn btn-primary" onclick={submitService} disabled={!svcTarget}>下发</button>
 			</div>
 		</div>
 		<div class="card p-4">
 			<div class="text-xs text-ink-muted">发布（只重建受影响服务）</div>
 			<div class="mt-2.5 flex flex-wrap items-end gap-2.5">
 				<div class="field">
-					<label>Agent</label>
-					<select class="input" bind:value={deploy.agent_id}>
+					<label for="f-deploySite">网站</label>
+					<select id="f-deploySite" class="input" bind:value={deploySite}>
 						<option value="">选择</option>
-						{#each portal.agents as a (a.agent_id)}<option value={a.agent_id}>{a.agent_id}</option>{/each}
+						{#each operableSites as s (s.name)}<option value={s.name}>{labelOf(s)}</option>{/each}
 					</select>
 				</div>
 				<div class="field">
-					<label>Compose 项目</label>
-					<input class="input" placeholder="如 hotspot" bind:value={deploy.project} />
+					<label for="f-deployAgent">机器</label>
+					<select id="f-deployAgent" class="input" bind:value={deployAgent} disabled={!deploySiteObj}>
+						<option value="">选择</option>
+						{#each (deploySiteObj?.agents ?? []).filter((a) => a.online) as a (a.agent_id)}
+							<option value={a.agent_id}>{a.agent_id}</option>
+						{/each}
+					</select>
 				</div>
 				<div class="field flex-[2]">
-					<label>受影响服务（逗号分隔）</label>
-					<input class="input" placeholder="如 backend,nginx" bind:value={deploy.targets} />
+					<label for="f-deployTargets">受影响服务（逗号分隔）</label>
+					<input id="f-deployTargets" class="input" placeholder="如 backend,nginx" bind:value={deployTargets} />
 				</div>
 				<button class="btn btn-primary" onclick={submitDeploy}>发布</button>
 			</div>

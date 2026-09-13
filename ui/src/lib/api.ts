@@ -58,6 +58,32 @@ export interface Agent {
 	};
 }
 
+/** 统一网站视图（/api/portal/sites）：按网站聚合的容器、git 与原生注册元数据。 */
+export interface SiteAgentRef {
+	agent_id: string;
+	online: boolean;
+}
+
+/** 聚合视图中的容器/git 记录附带来源 agent（命令按机器下发）。 */
+export interface SiteContainer extends AgentContainer {
+	agent_id: string;
+}
+
+export interface SiteGit extends AgentSite {
+	agent_id: string;
+}
+
+export interface SiteOverview {
+	name: string;
+	agents: SiteAgentRef[];
+	containers: SiteContainer[];
+	git: SiteGit[];
+	ops_url?: string;
+	cert_serial?: string;
+	registered_at?: string;
+	source: 'agent' | 'native' | 'both';
+}
+
 export interface CertRecord {
 	id: string;
 	label: string;

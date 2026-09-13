@@ -200,10 +200,10 @@ func main() {
 	// 审计（admin）
 	mux.HandleFunc("GET /api/portal/audit", requireRole("ops.admin", apiAuditList))
 
-	// 证书分类管理：service（portal 出网调用被管网站）/ site（网站注册证书）
+	// 统一网站视图（心跳 + 原生注册合并，viewer+；签发类操作仍 admin）
 	mux.HandleFunc("POST /api/portal/service-cert/issue", requireRole("ops.admin", apiServiceCertIssue))
 	mux.HandleFunc("POST /api/portal/site-certificates/issue", requireRole("ops.admin", apiSiteCertificateIssue))
-	mux.HandleFunc("GET /api/portal/sites", requireRole("ops.admin", apiPortalSites))
+	mux.HandleFunc("GET /api/portal/sites", requireRole("ops.viewer", apiPortalSites))
 	// 被管网站自助注册（须出示 kind=site 证书，边缘 mTLS 照常强制）
 	mux.HandleFunc("POST /api/site/register", requireCert(apiSiteRegister))
 

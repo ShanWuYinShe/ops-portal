@@ -37,6 +37,22 @@
 human 与 service/site/agent 物理同源（CF 托管 CA）但 kind 隔离、权限面互斥：
 管理面只认 human，机器树只认 agent，注册树只认 site，被管网站只认 service。
 
+## 统一网站视图（「网站」是一等实体）
+
+portal 以**网站**（而非机器或容器）组织被管对象。两条接入路径汇入同一视图
+`GET /api/portal/sites`（viewer+，UI「站点与服务」页直接消费）：
+
+- **agent 心跳**（实时）：compose 项目名 = 网站名；每个网站聚合出
+  部署机器（含在线状态）、容器列表（每条附 agent_id，操作命令按它下发）、
+  git 版本；
+- **原生注册**（sites.json 持久）：网站的 ops 接口元数据
+  （ops_url / cert_serial / registered_at）。
+
+同一网站两条路都有时（`source: both`）两份信息合并展示；仅原生注册、
+尚无 agent 心跳的网站（`source: native`）如实显示「已注册接口、无运行实例」，
+不与机器数据混排。注册 ≠ 可达：portal 对 ops_url 的连通验证
+（service 证书探测 `/ops/v1/health`）待首个原生站点实际部署时落地。
+
 ## 被管网站的 ops 管理接口（/ops/v1/*，原生实现模式）
 
 网站原生实现统一被管接口时，在自己域名下暴露（建议 `<site>-ops.yinghuoren.com`，
@@ -47,7 +63,10 @@ human 与 service/site/agent 物理同源（CF 托管 CA）但 kind 隔离、权
 - 端点（与 ops.agent.v1 同面，方向相反，由 portal 拉取）：
   `GET /ops/v1/health`、`GET /ops/v1/status`（站点/容器/版本快照）。
 - 接入：portal 签发 `site` 注册证书 → 网站调 `POST /api/site/register`
-  登记自己的 ops 接口地址 → portal 以 service 证书调用验证连通。
+  登记自己的 ops 接口地址（注册进统一网站视图）→ portal 以 service 证书
+  调用验证连通（待首个原生站点落地时实现）。
+- 域名须真实存在且接口已实现后再注册；注册的 ops_url 会在
+  「站点与服务」页展示，死链/未实现接口的注册只会暴露问题而非隐藏问题。
 
 ## 注册（enrollment，免人工复制 token）
 

@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -218,15 +219,132 @@ func apiSiteRegister(w http.ResponseWriter, r *http.Request) {
 	writeOK(w, map[string]any{"site": name, "registered": true})
 }
 
-// GET /api/portal/sites（admin）—— 已注册站点清单。
+// ── 统一网站视图（「网站」是 portal 的一等实体）──
+//
+// 两条接入路径汇入同一视图，不复制数据：
+//   - agent 心跳（内存实时）：compose 项目 → 该网站部署在哪些机器、容器、git 版本；
+//   - 原生注册表（sites.json 持久）：网站的 ops 接口元数据（ops_url 等）。
+// agent 掉线时网站仍在（带离线标记），原生注册不受 agent 存亡影响。
+
+type siteAgentRef struct {
+	AgentID string `json:"agent_id"`
+	Online  bool   `json:"online"`
+}
+
+// 容器 / git 记录附 agent 归属：容器操作、deploy 都按机器下发，
+// 网站部署在多台机器时每条记录各自携带目标 agent。
+type siteContainer struct {
+	agentContainer
+	AgentID string `json:"agent_id"`
+}
+
+type siteGitView struct {
+	agentSite
+	AgentID string `json:"agent_id"`
+}
+
+type siteView struct {
+	Name       string          `json:"name"`
+	Agents     []siteAgentRef  `json:"agents"`
+	Containers []siteContainer `json:"containers"`
+	Git        []siteGitView   `json:"git"`
+	OpsURL     string          `json:"ops_url,omitempty"`
+	CertSerial string          `json:"cert_serial,omitempty"`
+	// RegisteredAt 仅原生注册的网站有值；agent 发现的网站以心跳为准。
+	RegisteredAt string `json:"registered_at,omitempty"`
+	// Source: agent（心跳发现）/ native（仅注册表）/ both。
+	Source string `json:"source"`
+}
+
+func agentOnlineAt(t time.Time) bool { return time.Since(t) < time.Minute }
+
+// buildSiteViews 按网站名聚合心跳与注册表；名字升序。
+func buildSiteViews() ([]siteView, error) {
+	reg, err := loadSites()
+	if err != nil {
+		return nil, err
+	}
+	native := make(map[string]siteEntry, len(reg.Sites))
+	for _, e := range reg.Sites {
+		native[e.Name] = e
+	}
+
+	views := make(map[string]*siteView)
+	viewOf := func(name string) *siteView {
+		v, ok := views[name]
+		if !ok {
+			v = &siteView{Name: name, Containers: []siteContainer{}, Git: []siteGitView{}}
+			views[name] = v
+		}
+		return v
+	}
+
+	agentStore.Lock()
+	for id, st := range agentStore.m {
+		ref := siteAgentRef{AgentID: id, Online: agentOnlineAt(st.LastSeen)}
+		hb := st.Heartbeat
+		seen := make(map[string]bool, len(hb.ComposeProjects))
+		ensureAgent := func(v *siteView) {
+			if !seen[v.Name] {
+				v.Agents = append(v.Agents, ref)
+				seen[v.Name] = true
+			}
+			if v.Source == "" {
+				v.Source = "agent"
+			}
+		}
+		for _, p := range hb.ComposeProjects {
+			ensureAgent(viewOf(p))
+		}
+		for _, c := range hb.Containers {
+			if c.Project == "" {
+				continue
+			}
+			v := viewOf(c.Project)
+			v.Containers = append(v.Containers, siteContainer{agentContainer: c, AgentID: id})
+			ensureAgent(v)
+		}
+		for _, g := range hb.Sites {
+			v := viewOf(g.Name)
+			v.Git = append(v.Git, siteGitView{agentSite: g, AgentID: id})
+			ensureAgent(v)
+		}
+	}
+	agentStore.Unlock()
+
+	for name, e := range native {
+		v := viewOf(name)
+		v.OpsURL, v.CertSerial, v.RegisteredAt = e.OpsURL, e.CertSerial, e.RegisteredAt
+		if v.Source == "agent" {
+			v.Source = "both"
+		} else {
+			v.Source = "native"
+		}
+	}
+
+	out := make([]siteView, 0, len(views))
+	for _, v := range views {
+		if v.Agents == nil {
+			v.Agents = []siteAgentRef{}
+		}
+		sort.Slice(v.Containers, func(i, j int) bool {
+			return v.Containers[i].Service < v.Containers[j].Service
+		})
+		out = append(out, *v)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+// GET /api/portal/sites（viewer+）—— 统一网站视图（心跳 + 原生注册合并）。
 func apiPortalSites(w http.ResponseWriter, r *http.Request) {
 	if !mustMethod(w, r, http.MethodGet) {
 		return
 	}
-	s, err := loadSites()
+	views, err := buildSiteViews()
 	if err != nil {
 		writeInternalError(w, err)
 		return
 	}
-	writeOK(w, map[string]any{"sites": s.Sites})
+	writeOK(w, map[string]any{"sites": views})
 }

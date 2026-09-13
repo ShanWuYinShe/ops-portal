@@ -1,18 +1,23 @@
-// 全局共享状态（Svelte 5 runes）：whoami / agents，由 layout 轮询刷新。
+// 全局共享状态（Svelte 5 runes）：whoami / agents / sites，由 layout 轮询刷新。
 
-import { api, type Agent, type Whoami } from '$lib/api';
+import { api, type Agent, type SiteOverview, type Whoami } from '$lib/api';
 
 export const portal = $state({
 	whoami: null as Whoami | null,
 	agents: [] as Agent[],
+	sites: [] as SiteOverview[],
 	loadError: ''
 });
 
 export async function loadPortal() {
 	try {
 		portal.whoami = await api<Whoami>('/api/portal/whoami');
-		const a = await api<{ agents: Agent[] }>('/api/portal/agents');
+		const [a, s] = await Promise.all([
+			api<{ agents: Agent[] }>('/api/portal/agents'),
+			api<{ sites: SiteOverview[] }>('/api/portal/sites')
+		]);
 		portal.agents = a.agents ?? [];
+		portal.sites = s.sites ?? [];
 		portal.loadError = '';
 	} catch (e) {
 		portal.loadError = (e as Error).message;
