@@ -41,6 +41,9 @@ services:
       - CERT_FINGERPRINT_HEADER=${CERT_FINGERPRINT_HEADER:-}
       - DEV_ALLOW_NO_CERT=${DEV_ALLOW_NO_CERT:-}
       - AGENT_TOKEN=${AGENT_TOKEN:-}
+      # 机器证书包签发：调 CF 托管 CA API（token 仅服务器 IP 白名单可用）
+      - CF_API_TOKEN=${CF_API_TOKEN:-}
+      - CF_ZONE_ID=${CF_ZONE_ID:-}
     volumes:
       - ./.workwork/data:/app/data
     healthcheck:
