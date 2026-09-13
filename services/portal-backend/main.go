@@ -4,11 +4,12 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
 
-// agent 上报状态（内存保存，Phase 1 不持久化；Phase 2 落盘 SQLite）。
+// agent 上报状态（内存保存；Phase 2 命令队列落盘，状态仍内存）。
 
 type agentSite struct {
 	Name   string `json:"name"`
@@ -63,8 +64,35 @@ func apiAgentHeartbeat(w http.ResponseWriter, r *http.Request) {
 	agentStore.Lock()
 	agentStore.m[hb.AgentID] = agentState{Heartbeat: hb, LastSeen: time.Now()}
 	agentStore.Unlock()
-	// Phase 1：命令队列为空，返回空数组占位（Phase 2 下发启停重启）
-	writeOK(w, map[string]any{"commands": []any{}})
+	// 取走该 agent 的排队命令（agent 执行后经 /report 回传结果）
+	writeOK(w, map[string]any{"commands": takeCommands(hb.AgentID)})
+}
+
+type commandReport struct {
+	ID     string `json:"id"`
+	Status string `json:"status"` // done / failed
+	Result string `json:"result"`
+}
+
+func apiAgentReport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var body struct {
+		AgentID string          `json:"agent_id"`
+		Reports []commandReport `json:"reports"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	for _, rep := range body.Reports {
+		if err := reportCommand(body.AgentID, rep.ID, rep.Status, rep.Result); err != nil {
+			log.Printf("portal: report %s failed: %v", rep.ID, err)
+		}
+	}
+	writeOK(w, nil)
 }
 
 func apiPortalAgents(w http.ResponseWriter, r *http.Request) {
@@ -75,9 +103,16 @@ func apiPortalAgents(w http.ResponseWriter, r *http.Request) {
 	agentStore.Lock()
 	out := make([]map[string]any, 0, len(agentStore.m))
 	for id, st := range agentStore.m {
+		pending := 0
+		for _, c := range listCommands(id) {
+			if c.Status == "queued" || c.Status == "acked" {
+				pending++
+			}
+		}
 		out = append(out, map[string]any{
 			"agent_id":  id,
 			"last_seen": st.LastSeen.Format(time.RFC3339),
+			"pending":   pending,
 			"heartbeat": st.Heartbeat,
 		})
 	}
@@ -87,12 +122,15 @@ func apiPortalAgents(w http.ResponseWriter, r *http.Request) {
 
 func apiPortalWhoami(w http.ResponseWriter, r *http.Request) {
 	id := certFromRequest(r)
+	u := userFromContext(r)
 	writeOK(w, map[string]any{
 		"verified":    id.Verified,
 		"serial":      id.Serial,
 		"subject":     id.Subject,
 		"fingerprint": id.Fingerprint,
 		"trusted":     id.Trusted,
+		"username":    u.Username,
+		"role":        u.Role,
 		"dev_no_cert": getEnv("DEV_ALLOW_NO_CERT", "") != "",
 	})
 }
@@ -101,14 +139,55 @@ func apiPortalHealth(w http.ResponseWriter, _ *http.Request) {
 	writeOK(w, map[string]any{"status": "ok", "service": "ops-portal"})
 }
 
+// requireAgentTokenV2 先查 token 库（多 token），回退兼容旧单 AGENT_TOKEN。
+func requireAgentTokenV2(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		got := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+		if got == "" {
+			writeError(w, http.StatusUnauthorized, "invalid agent token")
+			return
+		}
+		if _, ok := validAgentToken(got); ok {
+			next(w, r)
+			return
+		}
+		// 回退：旧单 token（本地 dev 过渡）
+		if want := strings.TrimSpace(getEnv("AGENT_TOKEN", "")); want != "" && constantTimeEqual(got, want) {
+			next(w, r)
+			return
+		}
+		writeError(w, http.StatusUnauthorized, "invalid agent token")
+	}
+}
+
 func main() {
 	port := getEnv("PORTAL_BACKEND_PORT", "8319")
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/portal/health", apiPortalHealth)
-	mux.HandleFunc("GET /api/portal/whoami", requireCert(apiPortalWhoami))
-	mux.HandleFunc("GET /api/portal/agents", requireCert(apiPortalAgents))
-	mux.HandleFunc("POST /api/agent/heartbeat", requireAgentToken(apiAgentHeartbeat))
+	mux.HandleFunc("GET /api/portal/whoami", requireRole("ops.viewer", apiPortalWhoami))
+	mux.HandleFunc("GET /api/portal/agents", requireRole("ops.viewer", apiPortalAgents))
+
+	// 证书库（读 viewer+，写 admin）
+	mux.HandleFunc("GET /api/portal/certs", requireRole("ops.viewer", apiCertsList))
+	mux.HandleFunc("POST /api/portal/certs/register", requireRole("ops.admin", apiCertsAdd))
+	mux.HandleFunc("POST /api/portal/certs/revoke", requireRole("ops.admin", apiCertsRevoke))
+
+	// agent token（admin）
+	mux.HandleFunc("GET /api/portal/agent-tokens", requireRole("ops.admin", apiAgentTokens))
+	mux.HandleFunc("POST /api/portal/agent-tokens/issue", requireRole("ops.admin", apiAgentTokensIssue))
+	mux.HandleFunc("POST /api/portal/agent-tokens/revoke", requireRole("ops.admin", apiAgentTokensRevoke))
+
+	// 命令（读 viewer+，入队 operator+）
+	mux.HandleFunc("GET /api/portal/commands", requireRole("ops.viewer", apiCommandsList))
+	mux.HandleFunc("POST /api/portal/commands/enqueue", requireRole("ops.operator", apiCommandsEnqueue))
+
+	// 审计（admin）
+	mux.HandleFunc("GET /api/portal/audit", requireRole("ops.admin", apiAuditList))
+
+	// agent 树（token 鉴权）
+	mux.HandleFunc("POST /api/agent/heartbeat", requireAgentTokenV2(apiAgentHeartbeat))
+	mux.HandleFunc("POST /api/agent/report", requireAgentTokenV2(apiAgentReport))
 
 	// 前端静态页（Docker 构建时把 ui/dist 拷到 /app/ui）
 	mux.Handle("GET /", http.FileServer(http.Dir("/app/ui")))

@@ -1,0 +1,153 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/client"
+)
+
+// 命令执行：心跳取回命令 → 本地 docker 执行（白名单动作 + 项目白名单）→
+// 经 /api/agent/report 回传结果。容器按 compose service 名定位，
+// 与 workwork 的 apiServiceAction 模式一致。
+
+type inboundCommand struct {
+	ID      string `json:"id"`
+	AgentID string `json:"agent_id"`
+	Action  string `json:"action"`
+	Service string `json:"service"`
+}
+
+type reportItem struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+	Result string `json:"result"`
+}
+
+func findServiceContainer(ctx context.Context, cli *client.Client, service string, projects []string) (string, error) {
+	opCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	list, err := cli.ContainerList(opCtx, container.ListOptions{All: true})
+	if err != nil {
+		return "", err
+	}
+	allow := map[string]bool{}
+	for _, p := range projects {
+		allow[p] = true
+	}
+	for _, c := range list {
+		if c.Labels["com.docker.compose.service"] != service {
+			continue
+		}
+		if len(allow) > 0 && !allow[c.Labels["com.docker.compose.project"]] {
+			continue
+		}
+		return c.ID, nil
+	}
+	return "", fmt.Errorf("service %q not found in projects %v", service, projects)
+}
+
+// isSelfTarget 判断命令目标是否为 agent 自身容器。
+// compose 默认 hostname 即容器短 ID，目标完整 ID 以它开头即命中。
+func isSelfTarget(ctx context.Context, cli *client.Client, service string, projects []string, hostname string) bool {
+	if hostname == "" {
+		return false
+	}
+	id, err := findServiceContainer(ctx, cli, service, projects)
+	if err != nil {
+		return false
+	}
+	if strings.HasPrefix(id, hostname) {
+		return true
+	}
+	short := id
+	if len(short) > 12 {
+		short = short[:12]
+	}
+	return strings.HasPrefix(hostname, short)
+}
+
+func execCommand(ctx context.Context, cli *client.Client, cmd inboundCommand, projects []string) reportItem {
+	switch cmd.Action {
+	case "start", "stop", "restart":
+	default:
+		return reportItem{ID: cmd.ID, Status: "failed", Result: "invalid action"}
+	}
+	id, err := findServiceContainer(ctx, cli, cmd.Service, projects)
+	if err != nil {
+		return reportItem{ID: cmd.ID, Status: "failed", Result: err.Error()}
+	}
+	opCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	timeout := 10
+	switch cmd.Action {
+	case "start":
+		err = cli.ContainerStart(opCtx, id, container.StartOptions{})
+	case "stop":
+		err = cli.ContainerStop(opCtx, id, container.StopOptions{Timeout: &timeout})
+	case "restart":
+		err = cli.ContainerRestart(opCtx, id, container.StopOptions{Timeout: &timeout})
+	}
+	if err != nil {
+		return reportItem{ID: cmd.ID, Status: "failed", Result: err.Error()}
+	}
+	return reportItem{ID: cmd.ID, Status: "done", Result: cmd.Action + " ok"}
+}
+
+func postReport(ctx context.Context, portalURL, token, agentID string, reps []reportItem) error {
+	body, err := json.Marshal(map[string]any{"agent_id": agentID, "reports": reps})
+	if err != nil {
+		return err
+	}
+	opCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(opCtx, http.MethodPost,
+		strings.TrimRight(portalURL, "/")+"/api/agent/report", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("report status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func drainCommands(ctx context.Context, cli *client.Client, portalURL, token, agentID string, cmds []inboundCommand, projects []string) {
+	if len(cmds) == 0 {
+		return
+	}
+	log.Printf("agent: executing %d command(s)", len(cmds))
+	hostname, _ := os.Hostname()
+	for _, c := range cmds {
+		log.Printf("agent: %s %s (%s)", c.Action, c.Service, c.ID)
+		// 目标容器就是 agent 自己时（hostname 即容器短 ID），restart/stop
+		// 会杀掉本进程：先回传"即将执行"，结果由下次心跳的容器状态体现
+		// （Up 时间重置即成功）。判断依据：目标 ID 以 hostname 开头。
+		if isSelfTarget(ctx, cli, c.Service, projects, hostname) {
+			rep := reportItem{ID: c.ID, Status: "done", Result: c.Action + " self: reported before exec, verify by container uptime"}
+			if err := postReport(ctx, portalURL, token, agentID, []reportItem{rep}); err != nil {
+				log.Printf("agent: report %s failed: %v", c.ID, err)
+			}
+		}
+		rep := execCommand(ctx, cli, c, projects)
+		// 逐条立即回传：批量回传在自操作场景下永远发不出去。
+		if err := postReport(ctx, portalURL, token, agentID, []reportItem{rep}); err != nil {
+			log.Printf("agent: report %s failed: %v", c.ID, err)
+		}
+	}
+}

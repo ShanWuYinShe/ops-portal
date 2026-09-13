@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -11,8 +12,8 @@ import (
 	"time"
 )
 
-// agent 主循环：采集本机快照 → POST 心跳到 portal → 取回命令队列
-// （Phase 1 命令为空，只验证上报链路与 token 鉴权）。
+// agent 主循环：采集本机快照 → POST 心跳到 portal → 取回命令队列 →
+// 本地执行 → 回传结果。
 
 type heartbeatRequest struct {
 	AgentID         string              `json:"agent_id"`
@@ -23,38 +24,39 @@ type heartbeatRequest struct {
 }
 
 type heartbeatResponse struct {
-	OK       bool `json:"ok"`
-	Commands []struct {
-		ID string `json:"id"`
-	} `json:"commands"`
+	OK       bool             `json:"ok"`
+	Commands []inboundCommand `json:"commands"`
 }
 
-func postHeartbeat(ctx context.Context, portalURL, token string, req heartbeatRequest) error {
+var errHeartbeatRejected = errors.New("heartbeat rejected")
+
+func postHeartbeat(ctx context.Context, portalURL, token string, req heartbeatRequest) ([]inboundCommand, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	opCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	httpReq, err := http.NewRequestWithContext(opCtx, http.MethodPost,
 		strings.TrimRight(portalURL, "/")+"/api/agent/heartbeat", bytes.NewReader(body))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+token)
 	resp, err := http.DefaultClient.Do(httpReq)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
 	var out heartbeatResponse
 	if err := json.NewDecoder(http.MaxBytesReader(nil, resp.Body, 1<<20)).Decode(&out); err != nil {
-		return err
+		return nil, err
 	}
-	_ = resp
-	_ = out
-	return nil
+	if !out.OK {
+		return nil, errHeartbeatRejected
+	}
+	return out.Commands, nil
 }
 
 func main() {
@@ -99,8 +101,11 @@ func main() {
 			Sites:           collectSites(ctx, sitesSpec),
 			Containers:      containers,
 		}
-		if err := postHeartbeat(ctx, portalURL, token, req); err != nil {
+		cmds, err := postHeartbeat(ctx, portalURL, token, req)
+		if err != nil {
 			log.Printf("heartbeat: post failed: %v", err)
+		} else {
+			drainCommands(ctx, cli, portalURL, token, agentID, cmds, projects)
 		}
 		<-tick.C
 	}

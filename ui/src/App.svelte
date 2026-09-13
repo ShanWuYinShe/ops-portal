@@ -1,60 +1,87 @@
 <script>
   import { onMount } from 'svelte';
+  import { api } from './lib/api.js';
+  import Sites from './lib/Sites.svelte';
+  import Commands from './lib/Commands.svelte';
+  import Certs from './lib/Certs.svelte';
+  import Tokens from './lib/Tokens.svelte';
+  import Audit from './lib/Audit.svelte';
 
   let whoami = null;
   let agents = [];
   let error = '';
+  let tab = 'sites';
+
+  let commandsRef;
+  let certsRef;
+  let tokensRef;
+  let auditRef;
 
   async function load() {
     error = '';
     try {
-      const w = await fetch('/api/portal/whoami');
-      whoami = await w.json();
-      const a = await fetch('/api/portal/agents');
-      const aj = await a.json();
-      agents = aj.agents ?? [];
+      whoami = await api('/api/portal/whoami');
+      const a = await api('/api/portal/agents');
+      agents = a.agents ?? [];
+      await refreshTab();
     } catch (e) {
       error = String(e);
     }
+  }
+
+  async function refreshTab() {
+    if (tab === 'commands') await commandsRef?.load?.();
+    if (tab === 'certs') await certsRef?.load?.();
+    if (tab === 'tokens') await tokensRef?.load?.();
+    if (tab === 'audit') await auditRef?.load?.();
+  }
+
+  async function switchTab(t) {
+    tab = t;
+    await refreshTab();
   }
 
   onMount(load);
 </script>
 
 <main>
-  <h1>Ops Portal（Phase 1 骨架）</h1>
+  <h1>Ops Portal（Phase 2）</h1>
+  {#if whoami}
+    <p>当前：{whoami.username}（{whoami.role}）· 证书 {whoami.serial || '无（dev）'}</p>
+  {/if}
   {#if error}
     <p class="error">加载失败：{error}</p>
   {/if}
-  <section>
-    <h2>门禁（whoami）</h2>
-    <pre>{JSON.stringify(whoami, null, 2)}</pre>
-  </section>
-  <section>
-    <h2>在线 Agent（{agents.length}）</h2>
-    {#each agents as a}
-      <details>
-        <summary>{a.agent_id}（{a.last_seen}）</summary>
-        <pre>{JSON.stringify(a.heartbeat, null, 2)}</pre>
-      </details>
-    {:else}
-      <p>暂无 agent 上报。本地联调：docker compose --profile dev up -d</p>
-    {/each}
-  </section>
-  <button onclick={load}>刷新</button>
+  <nav>
+    <button class:active={tab === 'sites'} onclick={() => switchTab('sites')}>站点</button>
+    <button class:active={tab === 'commands'} onclick={() => switchTab('commands')}>命令</button>
+    <button class:active={tab === 'certs'} onclick={() => switchTab('certs')}>证书</button>
+    <button class:active={tab === 'tokens'} onclick={() => switchTab('tokens')}>Token</button>
+    <button class:active={tab === 'audit'} onclick={() => switchTab('audit')}>审计</button>
+    <button onclick={load}>全部刷新</button>
+  </nav>
+
+  <div hidden={tab !== 'sites'}><Sites {agents} /></div>
+  <div hidden={tab !== 'commands'}><Commands {agents} onChange={load} bind:this={commandsRef} /></div>
+  <div hidden={tab !== 'certs'}><Certs bind:this={certsRef} /></div>
+  <div hidden={tab !== 'tokens'}><Tokens bind:this={tokensRef} /></div>
+  <div hidden={tab !== 'audit'}><Audit bind:this={auditRef} /></div>
 </main>
 
 <style>
   main {
-    max-width: 960px;
+    max-width: 1100px;
     margin: 2rem auto;
     padding: 0 1rem;
     font-family: system-ui, sans-serif;
   }
-  pre {
-    background: #f4f4f4;
-    padding: 1rem;
-    overflow: auto;
+  nav {
+    display: flex;
+    gap: 0.5rem;
+    margin: 1rem 0;
+  }
+  button.active {
+    font-weight: bold;
   }
   .error {
     color: #b00;
