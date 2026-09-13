@@ -33,16 +33,21 @@ cf.tls_client_auth.cert_issuer_ski eq "f275e69e4459913f80f4d9a36ba5ae9129c721c6"
 位置：Rules → Transform Rules → Modify Request Header → Create rule。
 
 - Rule name：`ops-cert-passthrough`
-- When：`http.host eq "ops.yinghuoren.com"`。
-- Then Set static/dynamic headers（Dynamic 值，字段名以面板实际变量名为准，
-  来自官方 client-certificate-variables 文档）：
-
-| Header | Dynamic 值 |
-|---|---|
-| `X-Cert-Verify` | `cf.tls_client_auth.cert_verified`（若面板无布尔转字符串，改用 `cf.tls_client_auth.cert_presented` 或固定 `"SUCCESS"` 占位并备注） |
-| `X-Cert-Serial` | `cf.tls_client_auth.cert_serial` |
-| `X-Cert-Subject` | `cf.tls_client_auth.cert_subject_dn` |
-| `X-Cert-Fingerprint` | `cf.tls_client_auth.cert_fingerprint_sha256` |
+- When incoming requests match：Custom filter expression，粘贴
+  `http.host eq "ops.yinghuoren.com"`。
+- Then Modify request header：Set dynamic（每行一个）：
+  - Header name `X-Cert-Verify`，Value 选 Dynamic，填
+    `cf.tls_client_auth.cert_verified`（官方确认 Workers 侧该值为
+    `"SUCCESS"`/`"NONE"` 字符串；Transform 侧若只接受字符串函数，
+    可用 `to_string(cf.tls_client_auth.cert_verified)`，以面板实际为准）。
+  - Header name `X-Cert-Serial`，Value Dynamic，
+    填 `cf.tls_client_auth.cert_serial`。
+  - Header name `X-Cert-Subject`，Value Dynamic，
+    填 `cf.tls_client_auth.cert_subject_dn`。
+  - Header name `X-Cert-Fingerprint`，Value Dynamic，
+    填 `cf.tls_client_auth.cert_fingerprint_sha256`。
+- 字段来源：官方 `client-certificate-variables` 文档（Ruleset Engine fields
+  可用于 WAF custom rules 与 request header modification rules）。
 
 - 注意：源站 nginx 原样透传，后端只认受信代理（portal-nginx）的头；
   客户端自带同名头不可信（真实性来自 Origin Pulls）。
