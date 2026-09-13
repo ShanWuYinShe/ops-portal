@@ -1,0 +1,48 @@
+# 服务器 agent（被管机侧）：上报 workwork/hotspot/ops-portal 三项目。
+# 独立 compose，与 portal 主文件分离，避免循环依赖。
+# 用法：AGENT_TOKEN=... docker compose -f agent-compose.yml up -d --build
+# 注意：站点目录同路径挂载（源 == 目标），deploy 解析才一致。
+
+services:
+  ops-agent:
+    build:
+      context: ./services/agent
+      dockerfile: Dockerfile
+      args:
+        GO_VERSION: ${GO_VERSION:-1.26.5}
+        ALPINE_VERSION: ${ALPINE_VERSION:-3.24.1}
+    container_name: ops-portal-agent-server
+    restart: unless-stopped
+    init: true
+    user: "0:0"
+    group_add:
+      - "${DOCKER_GID:-988}"
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    environment:
+      - TZ=Asia/Shanghai
+      - AGENT_ID=agent-server-01
+      - AGENT_TOKEN=${AGENT_TOKEN:?AGENT_TOKEN required}
+      - PORTAL_URL=http://portal-backend:8319
+      - AGENT_COMPOSE_PROJECTS=workwork,hotspot,ops-portal
+      - AGENT_SITES=workwork:/home/workuser/workwork,hotspot:/home/workuser/hotspot,ops-portal:/home/workuser/ops-portal
+      - AGENT_DEPLOY_DIRS=workwork:/home/workuser/workwork,hotspot:/home/workuser/hotspot,ops-portal:/home/workuser/ops-portal
+      - HEARTBEAT_INTERVAL=10s
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /home/workuser/workwork:/home/workuser/workwork:ro
+      - /home/workuser/hotspot:/home/workuser/hotspot:ro
+      - /home/workuser/ops-portal:/home/workuser/ops-portal:ro
+    networks:
+      - ops-portal_portal_net
+
+networks:
+  ops-portal_portal_net:
+    external: true
