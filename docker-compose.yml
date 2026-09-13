@@ -1,0 +1,133 @@
+name: ops-portal
+
+# ops-portal：独立统一管理站
+# 与 hotspot / workwork 平级，互不嵌套。portal 本身不挂 docker.sock，
+# 容器操作一律经各机 ops-agent 回连执行。
+#
+# 本地启动：cp .env.example .env && ./pki/dev-selfsign.sh && docker compose up -d --build
+# 入口：https://localhost:8443（dev 自签证书，浏览器会告警，属预期）
+
+services:
+  portal-backend:
+    build:
+      context: .
+      dockerfile: ./services/portal-backend/Dockerfile
+      args:
+        BUN_VERSION: ${BUN_VERSION:-1.3.14}
+        GO_VERSION: ${GO_VERSION:-1.26.5}
+        ALPINE_VERSION: ${ALPINE_VERSION:-3.24.1}
+    restart: unless-stopped
+    init: true
+    user: "1001:1001"
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - portal_net
+    environment:
+      - TZ=Asia/Shanghai
+      - PORTAL_BACKEND_PORT=${PORTAL_BACKEND_PORT:-8319}
+      - TRUSTED_PROXY_CIDRS=${TRUSTED_PROXY_CIDRS:-}
+      - TRUSTED_PROXY_HOSTS=${TRUSTED_PROXY_HOSTS:-}
+      - CERT_VERIFY_HEADER=${CERT_VERIFY_HEADER:-}
+      - CERT_SERIAL_HEADER=${CERT_SERIAL_HEADER:-}
+      - CERT_SUBJECT_HEADER=${CERT_SUBJECT_HEADER:-}
+      - CERT_FINGERPRINT_HEADER=${CERT_FINGERPRINT_HEADER:-}
+      - DEV_ALLOW_NO_CERT=${DEV_ALLOW_NO_CERT:-}
+      - AGENT_TOKEN=${AGENT_TOKEN:-}
+    volumes:
+      - ./.workwork/data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8319/api/portal/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  portal-nginx:
+    build:
+      context: ./services/portal-nginx
+      dockerfile: Dockerfile
+      args:
+        NGINX_VERSION: ${NGINX_VERSION:-1.30.4}
+    restart: unless-stopped
+    init: true
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - portal_net
+    ports:
+      # 同机部署时 443 已被 workwork 的 xray-forward 占用，故默认 8443；
+      # 独立主机可设 PORTAL_HTTPS_PORT=443。
+      - "${PORTAL_HTTPS_PORT:-8443}:443"
+    volumes:
+      - ./cert:/etc/nginx/certs:ro
+    depends_on:
+      portal-backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/nginx-health >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # 本地 dev 联调演示：agent 与 portal 同机，用内网直连回连。
+  # 生产被管机各自独立部署 agent，不在本文件里声明。
+  agent-local:
+    profiles: ["dev"]
+    build:
+      context: ./services/agent
+      dockerfile: Dockerfile
+      args:
+        GO_VERSION: ${GO_VERSION:-1.26.5}
+        ALPINE_VERSION: ${ALPINE_VERSION:-3.24.1}
+    init: true
+    # 本地 dev 联调用 root 跑以便读取 OrbStack 的 docker.sock；
+    # 生产被管机用 group_add: ${DOCKER_GID}（与 workwork 一致）。
+    user: "0:0"
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - portal_net
+    environment:
+      - TZ=Asia/Shanghai
+      - AGENT_ID=${AGENT_ID:-local-dev}
+      - AGENT_TOKEN=${AGENT_TOKEN:-change-me-dev-only}
+      - PORTAL_URL=${PORTAL_URL:-http://portal-backend:8319}
+      - AGENT_COMPOSE_PROJECTS=${AGENT_COMPOSE_PROJECTS:-ops-portal}
+      - AGENT_SITES=${AGENT_SITES:-}
+      - HEARTBEAT_INTERVAL=5s
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      portal-backend:
+        condition: service_healthy
+
+networks:
+  portal_net:
+    driver: bridge

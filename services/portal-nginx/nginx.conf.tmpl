@@ -1,0 +1,75 @@
+# ops-portal 网关
+# 模型：边缘（Cloudflare）做 mTLS 验人，源站只做两件事——
+#  1. 验 Cloudflare 身份（Origin Pulls，生产 on / 本地 dev off）；
+#  2. 把边缘透传的 X-Cert-* 头原样交给后端，后端再认表记账。
+#
+# 防伪造说明：透传头的真实性来自 Origin Pulls（只有 CF 能连上源站，
+# CF 的 Transform Rules 会覆写同名头）。客户端直打源站 IP 会被
+# ssl_verify_client 挡掉；dev 联调（verify off）无此保证，仅限本机。
+#
+# 占位符（entrypoint 做字面量替换，避免 envsubst 误伤 $host 等变量）：
+#   __OPS_DOMAIN__ __ORIGIN_PULL_VERIFY__
+#   __CERT_VERIFY_HEADER__ __CERT_VERIFY_VAR__
+#   __CERT_SERIAL_HEADER__ __CERT_SERIAL_VAR__
+#   __CERT_SUBJECT_HEADER__ __CERT_SUBJECT_VAR__
+#   __CERT_FINGERPRINT_HEADER__ __CERT_FINGERPRINT_VAR__
+
+server {
+    listen 127.0.0.1:8080;
+    server_name localhost;
+    access_log off;
+
+    location = /nginx-health {
+        return 204;
+    }
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name __OPS_DOMAIN__;
+
+    ssl_certificate /etc/nginx/certs/server_cert.pem;
+    ssl_certificate_key /etc/nginx/certs/server_cert.key;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_tickets off;
+    ssl_session_timeout 4h;
+
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # 源站验 Cloudflare：生产 on，本地 dev 自签联调 off。
+    ssl_client_certificate /etc/nginx/cloudflare-origin-pull.pem;
+    ssl_verify_client __ORIGIN_PULL_VERIFY__;
+
+    # 真实客户端 IP：CF 段 + real_ip_header 由 cloudflare-ips.conf 注入
+    # （entrypoint 启动时拉取，失败用内置 fallback）。
+    include /etc/nginx/cloudflare-ips.conf;
+    set_real_ip_from 127.0.0.0/8;
+    set_real_ip_from ::1/128;
+    set_real_ip_from 10.0.0.0/8;
+    set_real_ip_from 172.16.0.0/12;
+    set_real_ip_from 192.168.0.0/16;
+    real_ip_recursive on;
+
+    location / {
+        proxy_pass http://portal-backend:8319;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # 边缘证书信息原样透传（真实性由 Origin Pulls 保证，见文件头注释）
+        proxy_set_header __CERT_VERIFY_HEADER__ $__CERT_VERIFY_VAR__;
+        proxy_set_header __CERT_SERIAL_HEADER__ $__CERT_SERIAL_VAR__;
+        proxy_set_header __CERT_SUBJECT_HEADER__ $__CERT_SUBJECT_VAR__;
+        proxy_set_header __CERT_FINGERPRINT_HEADER__ $__CERT_FINGERPRINT_VAR__;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+    }
+}
