@@ -26,7 +26,8 @@ import urllib.request
 
 TOKEN = os.environ.get("CF_RULES_TOKEN", "")
 ZONE = os.environ.get("CF_ZONE_ID", "3c681cb3e32fb42f0fb9ddd38dfa858f")
-HOST = os.environ.get("OPS_DOMAIN", "ops.yinghuoren.com")
+HOSTS = [h.strip() for h in os.environ.get(
+    "OPS_DOMAINS", "ops.yinghuoren.com").split(",") if h.strip()]
 ISSUER_SKI = os.environ.get("CF_ISSUER_SKI", "f275e69e4459913f80f4d9a36ba5ae9129c721c6")
 
 TRANSFORM_DESC = "ops-cert-passthrough"
@@ -40,8 +41,11 @@ TRANSFORM_HEADERS = {
     "X-Cert-Fingerprint": {"operation": "set", "expression": "cf.tls_client_auth.cert_fingerprint_sha256"},
 }
 
+_HOST_SET = " ".join(f'"{h}"' for h in HOSTS)
+_HOST_EXPR = f"http.host in {{ {_HOST_SET} }}"
+
 WAF_EXPRESSION = (
-    f'(http.host eq "{HOST}" and '
+    f"({_HOST_EXPR} and "
     f"(not cf.tls_client_auth.cert_verified or cf.tls_client_auth.cert_revoked) "
     f'and cf.tls_client_auth.cert_issuer_ski eq "{ISSUER_SKI}")'
 )
@@ -90,12 +94,30 @@ def ensure_rule(phase, description, rule, required=True):
     return not required
 
 
+def ensure_hostname_associations():
+    """把 HOSTS 并入 zone 的 mTLS 主机关联（幂等，保留既有）。"""
+    got = api("GET", f"/zones/{ZONE}/certificate_authorities/hostname_associations")
+    current = (got.get("result") or {}).get("hostnames") or []
+    merged = sorted(set(current) | set(HOSTS))
+    if merged == sorted(current):
+        print(f"OK   hostname_associations: {merged} (无变化)")
+        return True
+    put = api("PUT", f"/zones/{ZONE}/certificate_authorities/hostname_associations",
+              {"hostnames": merged})
+    if put.get("success"):
+        print(f"OK   hostname_associations: {merged}")
+        return True
+    print(f"FAIL hostname_associations: {put.get('errors')}")
+    return False
+
+
 def main():
     if not TOKEN:
         sys.exit("need CF_RULES_TOKEN env")
+    ensure_hostname_associations()
     ok = ensure_rule("http_request_late_transform", TRANSFORM_DESC, {
         "action": "rewrite",
-        "expression": f'http.host eq "{HOST}"',
+        "expression": _HOST_EXPR,
         "description": TRANSFORM_DESC,
         "action_parameters": {"headers": TRANSFORM_HEADERS},
         "enabled": True,
