@@ -59,8 +59,8 @@ func certFromRequest(r *http.Request) certIdentity {
 }
 
 // requireCert 要求请求携带受信代理转发的有效证书标识。
-// Phase 1：verified 头非空即放行（边缘 WAF 已做真正的验签，此处只认账）。
-// Phase 2：在此叠加本地有效证书表（serial/fingerprint）与 RBAC。
+// 生产模式双条件：边缘 verified 非空 + serial/指纹命中本地 active 证书库。
+// 吊销即本地 revoke（边缘 WAF 规则另行同步，见 docs/cf-edge.md）。
 func requireCert(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := certFromRequest(r)
@@ -77,8 +77,22 @@ func requireCert(next http.HandlerFunc) http.HandlerFunc {
 			writeError(w, http.StatusUnauthorized, "client certificate required")
 			return
 		}
+		if findActiveCert(id.Serial, id.Fingerprint) == nil {
+			log.Printf("portal: unknown/revoked cert serial=%s fp=%s from %s",
+				maskMiddle(id.Serial), maskMiddle(id.Fingerprint), r.RemoteAddr)
+			writeError(w, http.StatusForbidden, "certificate not authorized")
+			return
+		}
 		next(w, r)
 	}
+}
+
+// maskMiddle 日志脱敏：留首尾各 6 字符。
+func maskMiddle(s string) string {
+	if len(s) <= 12 {
+		return "***"
+	}
+	return s[:6] + "..." + s[len(s)-6:]
 }
 
 // requireAgentToken 要求 agent 请求携带预共享 token。

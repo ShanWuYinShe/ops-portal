@@ -66,6 +66,9 @@ services:
       - CHOWN
       - SETGID
       - SETUID
+      # DAC_OVERRIDE: cert 私钥 600 属宿主机 uid，容器内 root 无此 cap
+      # 读不到 key（与 workwork nginx 同理，仅 master 用，worker 无 cap）。
+      - DAC_OVERRIDE
     logging:
       driver: "json-file"
       options:

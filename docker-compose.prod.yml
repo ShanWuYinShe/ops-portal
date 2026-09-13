@@ -1,0 +1,19 @@
+# 生产部署（服务器）：ipvlan 公网 IPv6 + Origin Pulls 强制。
+# 用法：docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+# 前置：.env 配好（见 .env.prod.example），cert/ 放 Origin CA 源站证书。
+
+services:
+  portal-nginx:
+    environment:
+      - OPS_DOMAIN=${OPS_DOMAIN:-ops.yinghuoren.com}
+      - ORIGIN_PULL_VERIFY=on
+    networks:
+      portal_net: {}
+      ipvlan_docker:
+        ipv6_address: "${PORTAL_IPV6:-2605:a141:2322:2623:1::30}"
+    # 生产经 CF 回源，不占宿主机 443（443 已被 xray-forward 占用）
+    ports: !override []
+
+networks:
+  ipvlan_docker:
+    external: true
