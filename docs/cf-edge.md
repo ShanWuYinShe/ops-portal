@@ -20,7 +20,7 @@
 |---|---|---|
 | DNS AAAA → `::30` 橙云 | API | ✅ |
 | mTLS 主机关联（托管 CA） | `PUT .../certificate_authorities/hostname_associations` | ✅ |
-| 设备证书 `liyou-mbpro`（serial `26b759…`，至 2028-12） | API 签发（CSR 本地生成），p12 已入钥匙串 | ✅ |
+| 设备证书 `liyou-mbpro`（serial `197FE164…`，至 2028-12-16） | API 签发（CSR 本地生成），p12 归档 `~/cf_token_and_cert/ops.yinghuoren.com/` | ✅ |
 | 证书登记 + `liyou/ops.admin` 绑定 | portal 证书库（服务器 `.workwork/data/certs.json`、`users.json`） | ✅ |
 | Transform 透传规则 `ops-cert-passthrough` | API（phase `http_request_late_transform`，action `rewrite`，headers 为**对象**） | ✅ |
 | Origin Pulls + nginx `ssl_verify_client on` | zone 全局 + `ORIGIN_PULL_VERIFY=on` | ✅ |
@@ -43,6 +43,8 @@ WAF 自定义规则（边缘直接拦无证/吊销证，省源站开销）：
 
 ## 日常运维
 
-- 新设备：openssl 生成 CSR → API 签发（或面板 Add Certificate）→ portal 证书页登记 → 装证。
-- 吊销：CF 面板 Revoke（或 API 删除）+ portal 证书页置 revoked。
+- 新设备：openssl 生成 CSR → API 签发（或面板 Add Certificate）→ portal 证书页登记 → 装证 → p12 按规范归档 `~/cf_token_and_cert/ops.yinghuoren.com/`（命名：用途_持有人-设备）。
+- 吊销：CF 面板 Revoke（或 API 删除）+ portal 证书页置 revoked + 归档目录移除/标记对应 p12。
+- 轮换记录：初代证书 `cert-mbpro-01`（serial `26B7…`）因私钥失效已双端吊销，
+  由 `cert-mbpro-02`（serial `197FE164…`）接替，users.json 绑定随之换绑。
 - 规则变更/重建：`CF_RULES_TOKEN=$(cat ~/cf_token_and_cert/cf_account_token) python3 pki/cf_edge_setup.py`（幂等）。
