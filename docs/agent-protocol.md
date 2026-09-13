@@ -25,6 +25,30 @@
 边缘 WAF 规则对 `/api/agent/*` 路径豁免 mTLS（agent 有独立 token 鉴权），
 其余路径无证书一律边缘拦截。
 
+## 证书分类（严格分域，互不混用）
+
+| kind | 签发给 | 用途 | 能访问 |
+|---|---|---|---|
+| `human` | 人（每台设备） | 登录 portal 管理面 | `/api/portal/*` 全部（按 RBAC） |
+| `agent` | 被管机 ops-agent | 机器上报与命令执行 | `/api/agent/*` |
+| `service` | **ops 服务端自身** | portal 主动调用被管网站的 ops 接口时出示 | 被管网站的 `/ops/v1/*`（各网站放行清单钉死其 serial） |
+| `site` | 被管网站 | 网站访问 ops 注册 API 自助登记 | `/api/site/register` |
+
+human 与 service/site/agent 物理同源（CF 托管 CA）但 kind 隔离、权限面互斥：
+管理面只认 human，机器树只认 agent，注册树只认 site，被管网站只认 service。
+
+## 被管网站的 ops 管理接口（/ops/v1/*，原生实现模式）
+
+网站原生实现统一被管接口时，在自己域名下暴露（建议 `<site>-ops.yinghuoren.com`，
+加入 OPS_DOMAINS 后同样全路径强制边缘 mTLS）：
+
+- **放行规则**：仅接受出示 `service` 证书的调用方（校验透传的
+  `X-Cert-Serial` 等于 portal service 证书 serial；其余一律 403）。
+- 端点（与 ops.agent.v1 同面，方向相反，由 portal 拉取）：
+  `GET /ops/v1/health`、`GET /ops/v1/status`（站点/容器/版本快照）。
+- 接入：portal 签发 `site` 注册证书 → 网站调 `POST /api/site/register`
+  登记自己的 ops 接口地址 → portal 以 service 证书调用验证连通。
+
 ## 注册（enrollment，免人工复制 token）
 
 portal「Agent 令牌」页签发**一次性注册令牌**（`enroll_` 前缀，绑定 agent_id、
