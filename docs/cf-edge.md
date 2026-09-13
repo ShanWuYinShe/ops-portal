@@ -1,58 +1,48 @@
-# Cloudflare 边缘配置清单（ops.yinghuoren.com）
+# Cloudflare 边缘配置（ops.yinghuoren.com）— 实际落地记录
 
-> 人工在 CF 面板执行一次。字段名以面板实际文案对齐，规则生效后回填"已验证"。
+> 2026-09-14 全部落地并实测通过。多数步骤已 API 自动化（`pki/cf_edge_setup.py`）。
 
-## 1. DNS
+## 认证链（实测验证）
 
-- `ops.yinghuoren.com` → 源站，**橙云（已代理）**。
-- SSL/TLS 加密模式：Full (strict)。
+```
+浏览器（装设备证书）
+  → CF 边缘：验证证书（托管 CA，主机关联已启用）
+  → Transform 规则逐请求注入 X-Cert-Verify/Serial/Subject/Fingerprint
+  → 源站 nginx（Origin Pulls，直连 400 拒）原样透传
+  → portal 后端：serial/指纹查本地证书表（active）→ 200 / 不命中 403
+```
 
-## 2. 客户端证书（SSL/TLS → Client Certificates）
+实测：有证 whoami 200（liyou/ops.admin）；无证 403；直连源站 IP 400。
 
-- 用 Cloudflare 托管 CA 签发设备证书（免费版只能走这条；BYOCA 需 Enterprise）。
-- 每台设备一张：CN/备注写 `持有人-设备名`（如 `liyou-mbpro`）。
-- 记录每张证的序列号 / 指纹 / 有效期，供源站查表。
+## 已落地的项
 
-## 3. WAF 自定义规则（Security → WAF → Custom rules）
+| 项 | 方式 | 状态 |
+|---|---|---|
+| DNS AAAA → `::30` 橙云 | API | ✅ |
+| mTLS 主机关联（托管 CA） | `PUT .../certificate_authorities/hostname_associations` | ✅ |
+| 设备证书 `liyou-mbpro`（serial `26b759…`，至 2028-12） | API 签发（CSR 本地生成），p12 已入钥匙串 | ✅ |
+| 证书登记 + `liyou/ops.admin` 绑定 | portal 证书库（服务器 `.workwork/data/certs.json`、`users.json`） | ✅ |
+| Transform 透传规则 `ops-cert-passthrough` | API（phase `http_request_late_transform`，action `rewrite`，headers 为**对象**） | ✅ |
+| Origin Pulls + nginx `ssl_verify_client on` | zone 全局 + `ORIGIN_PULL_VERIFY=on` | ✅ |
 
-规则：主机 `ops.yinghuoren.com` 且无有效证书即 Block。
+注意：CF 透传的 serial 是**大写** hex，建证 API 返回小写；后端用 `EqualFold` 比较。
+无证请求时透传头为 `false`/空，源站查表不命中即 403。
 
-表达式（字段名来自官方文档）：
+## 可选加固（token 无权限，面板手工可加）
+
+WAF 自定义规则（边缘直接拦无证/吊销证，省源站开销）：
 
 ```text
 (http.host eq "ops.yinghuoren.com" and
- (not cf.tls_client_auth.cert_verified or cf.tls_client_auth.cert_revoked))
+ (not cf.tls_client_auth.cert_verified or cf.tls_client_auth.cert_revoked) and
+ cf.tls_client_auth.cert_issuer_ski eq "f275e69e4459913f80f4d9a36ba5ae9129c721c6")
 ```
 
-动作：Block。建议再叠加发卡方 SKI pin：
+动作 Block。发卡方 SKI 取自证书 Authority Key Identifier（非 CF API 的叶子 `ski` 字段）。
+不加也安全：源站证书表已拒无证/未知/吊销证。
 
-```text
-cf.tls_client_auth.cert_issuer_ski eq "<托管CA的SKI>"
-```
+## 日常运维
 
-SKI 取法（官方）：`openssl x509 -noout -ext authorityKeyIdentifier -in mtls.crt | tail -n1 | tr -d ': '`。
-
-## 4. 证书透传（Transform Rules → Request Header Modification）
-
-边缘向源站注入（字段名以面板实际为准）：
-
-| 请求头 | 值来源 |
-|---|---|
-| `X-Cert-Verify` | 证书验证结果（verified/ revoked 标记） |
-| `X-Cert-Serial` | `cf.tls_client_auth.cert_serial` |
-| `X-Cert-Subject` | `cf.tls_client_auth.cert_subject_dn` |
-| `X-Cert-Fingerprint` | `cf.tls_client_auth.cert_fingerprint_sha256` |
-
-源站 nginx 原样透传，portal-backend 按受信代理 + 本地有效证书表二次确认。
-注意：客户端自带的同名头不可信——真实性来自 Origin Pulls（只有 CF 能连源站）。
-
-## 5. 源站保护（SSL/TLS → Origin Server）
-
-- Authenticated Origin Pulls：Per-hostname 给 `ops.yinghuoren.com` 开 on。
-- nginx 侧 `ssl_verify_client on` 已在模板里（`ORIGIN_PULL_VERIFY=on`）。
-
-## 6. 验证步骤
-
-1. 无证访问 `https://ops.yinghuoren.com/` → 边缘 403（连源站日志都没有）。
-2. 有证访问 → 200，且源站日志/ whoami 能看到 subject/serial。
-3. 面板吊销一张证 → 该设备立刻 403，其他设备正常。
+- 新设备：openssl 生成 CSR → API 签发（或面板 Add Certificate）→ portal 证书页登记 → 装证。
+- 吊销：CF 面板 Revoke（或 API 删除）+ portal 证书页置 revoked。
+- 规则变更/重建：`CF_RULES_TOKEN=$(cat ~/cf_token_and_cert/cf_account_token) python3 pki/cf_edge_setup.py`（幂等）。

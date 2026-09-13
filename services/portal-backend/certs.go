@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -57,6 +58,7 @@ func saveCerts(s *certStore) error {
 }
 
 // findActiveCert 按 serial 或指纹找有效证书（门禁查表用）。
+// hex 串比较用 EqualFold：CF 透传的 serial 是大写，建证 API 返回小写。
 func findActiveCert(serial, fingerprint string) *certRecord {
 	certsMu.Lock()
 	defer certsMu.Unlock()
@@ -69,10 +71,10 @@ func findActiveCert(serial, fingerprint string) *certRecord {
 		if c.Status != "active" {
 			continue
 		}
-		if serial != "" && c.Serial == serial {
+		if serial != "" && strings.EqualFold(c.Serial, serial) {
 			return c
 		}
-		if fingerprint != "" && c.Fingerprint == fingerprint {
+		if fingerprint != "" && strings.EqualFold(c.Fingerprint, fingerprint) {
 			return c
 		}
 	}
