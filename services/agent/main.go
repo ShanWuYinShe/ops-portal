@@ -63,17 +63,6 @@ func main() {
 	agentID := getEnv("AGENT_ID", "")
 	portalURL := getEnv("PORTAL_URL", "http://portal-backend:8319")
 	token := getEnv("AGENT_TOKEN", "")
-	// 自助注册：无正式 token 时用一次性注册令牌换取（免人工复制）
-	if token == "" {
-		if enroll := getEnv("AGENT_ENROLL_TOKEN", ""); enroll != "" {
-			var err error
-			token, err = enrollAgent(portalURL, agentID, enroll)
-			if err != nil {
-				log.Fatalf("enroll failed: %v", err)
-			}
-			log.Printf("agent: enrolled %s, got agent token", agentID)
-		}
-	}
 	projects := splitCSV(getEnv("AGENT_COMPOSE_PROJECTS", ""))
 	sitesSpec := getEnv("AGENT_SITES", "")
 	deployDirs := parseDeployDirs(getEnv("AGENT_DEPLOY_DIRS", ""))

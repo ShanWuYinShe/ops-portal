@@ -47,11 +47,10 @@ _HOST_EXPR = f"http.host in {{ {_HOST_SET} }}"
 # 无证时 issuer_ski 为空串：SKI 条件必须用 ne 放在 or 链里，
 # 否则 eq 恒假导致无证请求不匹配、规则失效（实测踩坑）。
 # SKI 用大写（CF 官方示例格式）。
-# /api/agent/* 豁免边缘 mTLS：agent 无设备证书、以独立 bearer token 鉴权
-# （一次性 enroll 换证），不豁免会让外连 agent 在边缘被拦（实测踩坑）。
+# 机器（agent）同样持机器证书（kind=agent），边缘对全部路径强制 mTLS，
+# 不留任何免证路径。机器证书由 portal「机器证书包」签发（agentcerts.go）。
 WAF_EXPRESSION = (
-    f"({_HOST_EXPR} and "
-    f'not starts_with(http.request.uri.path, "/api/agent/") and ('
+    f"({_HOST_EXPR} and ("
     f"not cf.tls_client_auth.cert_verified "
     f"or cf.tls_client_auth.cert_revoked "
     f'or cf.tls_client_auth.cert_issuer_ski ne "{ISSUER_SKI}"))'

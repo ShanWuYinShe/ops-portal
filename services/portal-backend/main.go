@@ -141,7 +141,10 @@ func apiPortalHealth(w http.ResponseWriter, _ *http.Request) {
 	writeOK(w, map[string]any{"status": "ok", "service": "ops-portal"})
 }
 
-// requireAgentTokenV2 先查 token 库（多 token），回退兼容旧单 AGENT_TOKEN。
+// requireAgentTokenV2 机器树双因子：
+//   - 经 nginx（即经 CF 边缘 mTLS）的请求：机器证书须在表且 kind=agent，
+//     且证书 label（=agent_id）与 bearer token 的 agent_id 一致；
+//   - 同宿主机内网直连（不产生证书头，网络仅 portal_net 可达）：仅 token。
 func requireAgentTokenV2(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		got := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
@@ -149,16 +152,26 @@ func requireAgentTokenV2(next http.HandlerFunc) http.HandlerFunc {
 			writeError(w, http.StatusUnauthorized, "invalid agent token")
 			return
 		}
-		if _, ok := validAgentToken(got); ok {
-			next(w, r)
+		agentID, ok := validAgentToken(got)
+		if !ok {
+			if want := strings.TrimSpace(getEnv("AGENT_TOKEN", "")); want != "" && constantTimeEqual(got, want) {
+				agentID, ok = "legacy", true
+			}
+		}
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "invalid agent token")
 			return
 		}
-		// 回退：旧单 token（本地 dev 过渡）
-		if want := strings.TrimSpace(getEnv("AGENT_TOKEN", "")); want != "" && constantTimeEqual(got, want) {
-			next(w, r)
-			return
+		id := certFromRequest(r)
+		if id.Trusted {
+			c := findActiveCert(id.Serial, id.Fingerprint)
+			if c == nil || c.Kind != "agent" || c.Label != agentID {
+				log.Printf("portal: agent cert/token mismatch serial=%s", maskMiddle(id.Serial))
+				writeError(w, http.StatusForbidden, "agent certificate mismatch")
+				return
+			}
 		}
-		writeError(w, http.StatusUnauthorized, "invalid agent token")
+		next(w, r)
 	}
 }
 
@@ -187,11 +200,10 @@ func main() {
 	// 审计（admin）
 	mux.HandleFunc("GET /api/portal/audit", requireRole("ops.admin", apiAuditList))
 
-	// 注册令牌（admin 签发）与 agent 自助注册
-	mux.HandleFunc("POST /api/portal/agent-tokens/enroll-token", requireRole("ops.admin", apiAgentEnrollTokenIssue))
-	mux.HandleFunc("POST /api/agent/enroll", apiAgentEnroll)
+	// 机器证书包签发（admin）：机器证书 + 机器 token 一次发放
+	mux.HandleFunc("POST /api/portal/agent-certificates/issue", requireRole("ops.admin", apiAgentCertificateIssue))
 
-	// agent 树（token 鉴权）
+	// agent 树（双因子：机器证书 + token；同宿主机内网直连仅 token，见 exec 说明）
 	mux.HandleFunc("POST /api/agent/heartbeat", requireAgentTokenV2(apiAgentHeartbeat))
 	mux.HandleFunc("POST /api/agent/report", requireAgentTokenV2(apiAgentReport))
 

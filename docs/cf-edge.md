@@ -50,8 +50,9 @@
 - SKI 条件必须用 `ne` 放在 or 链里——无证请求的 issuer_ski 是空串，
   写成 `and ... eq "SKI"` 会恒假导致无证请求不匹配、规则失效。
 - SKI 用**大写**（CF 官方示例格式），小写会导致有效证书被误拦。
-- `/api/agent/*` 豁免边缘 mTLS：agent 无设备证书、以独立 bearer token 鉴权
-  （一次性 enroll 换证），不豁免会让外连 agent 在边缘被拦（实测踩坑）。
+- 机器（agent）同样持机器证书（portal「机器证书包」签发，kind=agent），
+  边缘对全部路径强制 mTLS，无免证路径；agent 请求在 origin 侧再验
+  「证书在表 + token 同 agent_id」双因子。
 - 发卡方 SKI 取自证书 Authority Key Identifier（非 CF API 返回的叶子 `ski` 字段）。
 
 ## 日常运维

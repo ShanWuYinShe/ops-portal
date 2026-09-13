@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 )
 
@@ -28,4 +29,10 @@ func writeOK(w http.ResponseWriter, v any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]any{"ok": false, "error": msg})
+}
+
+// writeInternalError 内部错误：对客户端只暴露固定文案，真实原因记日志。
+func writeInternalError(w http.ResponseWriter, err error) {
+	log.Printf("portal: internal error: %v", err)
+	writeError(w, http.StatusInternalServerError, "internal error")
 }

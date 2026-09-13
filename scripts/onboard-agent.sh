@@ -2,13 +2,14 @@
 # ops-portal 被管机一键接入（自助注册换证，免手工复制 token）
 #
 # 前置：本机已 checkout ops-portal 仓库（脚本用 services/agent 构建镜像）；
-#       portal 已签发一次性注册令牌（enroll_ 前缀，30 分钟有效，单次使用）。
+#       portal 已签发「机器证书包」bundle.json（含 agent_token/client_cert/
+#       client_key，由管理员在 portal 侧签发后交付本机）。
 #
 # 用法：
 #   bash scripts/onboard-agent.sh \
 #     --portal https://ops.yinghuoren.com \
 #     --agent-id agent-xxx-01 \
-#     --enroll-token enroll_xxxxxxxx \
+#     --bundle bundle.json \
 #     --project hotspot --site hotspot:/srv/hotspot --deploy hotspot:/srv/hotspot \
 #     [--local]            # portal 与本 agent 同一 docker 宿主机时使用（走内网）
 #
@@ -18,7 +19,7 @@
 set -euo pipefail
 
 PORTAL="https://ops.yinghuoren.com"
-AGENT_ID="" ENROLL="" LOCAL=0
+AGENT_ID="" BUNDLE="" LOCAL=0
 PROJECTS=() SITES=() DEPLOYS=()
 COMPOSE_OUT="agent-compose.generated.yml"
 
@@ -26,7 +27,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --portal) PORTAL="$2"; shift 2 ;;
     --agent-id) AGENT_ID="$2"; shift 2 ;;
-    --enroll-token) ENROLL="$2"; shift 2 ;;
+    --bundle) BUNDLE="$2"; shift 2 ;;
     --project) PROJECTS+=("$2"); shift 2 ;;
     --site) SITES+=("$2"); shift 2 ;;
     --deploy) DEPLOYS+=("$2"); shift 2 ;;
@@ -35,19 +36,17 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ -n "$AGENT_ID" && -n "$ENROLL" ]] || { echo "必须提供 --agent-id 与 --enroll-token" >&2; exit 1; }
+[[ -n "$AGENT_ID" && -n "$BUNDLE" ]] || { echo "必须提供 --agent-id 与 --bundle" >&2; exit 1; }
 [[ -d services/agent ]] || { echo "请在 ops-portal 仓库根目录执行（需要 services/agent 构建上下文）" >&2; exit 1; }
 
 join() { local IFS=,; echo "$*"; }
 
-# 1) 自助注册换取正式 token
-echo "==> 向 $PORTAL 注册 $AGENT_ID ..."
-RESP=$(curl -fsS --max-time 20 -X POST "$PORTAL/api/agent/enroll" \
-  -H 'Content-Type: application/json' \
-  -d "{\"enroll_token\":\"$ENROLL\",\"agent_id\":\"$AGENT_ID\"}")
-TOKEN=$(printf '%s' "$RESP" | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
-[[ -n "$TOKEN" ]] || { echo "注册失败: $RESP" >&2; exit 1; }
-echo "==> 已换取正式 token（已写入生成的 compose，勿外传）"
+# 1) 读取机器证书包
+TOKEN=$(python3 -c "import json,sys;print(json.load(open('$BUNDLE'))['agent_token'])")
+[[ -n "$TOKEN" ]] || { echo "bundle 缺 agent_token" >&2; exit 1; }
+python3 -c "import json;d=json.load(open('$BUNDLE'));open('agent-client.crt','w').write(d['client_cert']);open('agent-client.key','w').write(d['client_key'])"
+chmod 600 agent-client.crt agent-client.key
+echo "==> 机器证书与 token 已就位（写入生成的 compose，勿外传）"
 
 # 2) 生成 compose
 if [[ $LOCAL -eq 1 ]]; then
@@ -87,6 +86,8 @@ services:
       - TZ=Asia/Shanghai
       - AGENT_ID=${AGENT_ID}
       - AGENT_TOKEN=${TOKEN}
+      - AGENT_CERT=./agent-client.crt
+      - AGENT_KEY=./agent-client.key
       - PORTAL_URL=${PORTAL_URL}
       - AGENT_COMPOSE_PROJECTS=${PROJ_CSV}
       - AGENT_SITES=${SITE_CSV}

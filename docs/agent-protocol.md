@@ -16,10 +16,12 @@
 
 - 方向：**agent 主动外连 portal**（被管机零入站端口，NAT/CF 后无感知）。
 - URL：`https://ops.yinghuoren.com/api/agent/*`（生产）或内网直连（同机联调）。
-- 认证：`Authorization: Bearer <agent-token>`；token 由 portal「Token 页」签发，
-  一次性显示、可吊销，portal 只存 SHA-256 摘要。**一机一 token，泄露单吊即断。**
-- 整条链路在 portal 的 mTLS 体系之后（边缘验证设备证书 + Origin Pulls），
-  agent 侧无需客户端证书（token 即凭证），人访问 portal 才需要设备证书。
+- 认证：**双因子**——机器客户端证书（CF 托管 CA，kind=agent，过边缘 mTLS）
+  + `Authorization: Bearer <agent-token>`。portal「Agent 令牌」页签发
+  「机器证书包」（agent_token/client_cert/client_key 一次下发），机器证书
+  在证书表登记并与 agent_id 绑定；同宿主机内网直连仅 token（网络隔离）。
+- 边缘 WAF 对 ops 域名**全部路径**强制 mTLS（含 /api/agent/*，机器也持证，
+  不留免证路径）；token 泄露单独无效，必须连同机器证书才可通过边缘。
 边缘 WAF 规则对 `/api/agent/*` 路径豁免 mTLS（agent 有独立 token 鉴权），
 其余路径无证书一律边缘拦截。
 
