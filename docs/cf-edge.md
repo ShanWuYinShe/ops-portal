@@ -28,23 +28,35 @@
 注意：CF 透传的 serial 是**大写** hex，建证 API 返回小写；后端用 `EqualFold` 比较。
 无证请求时透传头为 `false`/空，源站查表不命中即 403。
 
-## 可选加固（token 无权限，面板手工可加）
+| WAF 自定义规则 `ops-mtls-required` | API（phase `http_request_firewall_custom`，action `block`） | ✅ |
 
-WAF 自定义规则（边缘直接拦无证/吊销证，省源站开销）：
+注意：CF 透传的 serial 是**大写** hex，建证 API 返回小写；后端用 `EqualFold` 比较。
+无证请求时透传头为 `false`/空，源站查表不命中即 403。
+
+## 边缘 WAF 拦截（已上线，实测）
+
+规则 `ops-mtls-required`（动作 Block），无证/吊销证/非本账户 CA 证书在 CF 边缘
+直接拦截（实测返回 CF "Attention Required" 拦截页，不再到达源站）：
 
 ```text
-(http.host eq "ops.yinghuoren.com" and
- (not cf.tls_client_auth.cert_verified or cf.tls_client_auth.cert_revoked) and
- cf.tls_client_auth.cert_issuer_ski eq "f275e69e4459913f80f4d9a36ba5ae9129c721c6")
+(http.host in {"ops.yinghuoren.com"} and (
+  not cf.tls_client_auth.cert_verified
+  or cf.tls_client_auth.cert_revoked
+  or cf.tls_client_auth.cert_issuer_ski ne "F275E69E4459913F80F4D9A36BA5AE9129C721C6"))
 ```
 
-动作 Block。发卡方 SKI 取自证书 Authority Key Identifier（非 CF API 的叶子 `ski` 字段）。
-不加也安全：源站证书表已拒无证/未知/吊销证。
+两个实测踩坑：
+- SKI 条件必须用 `ne` 放在 or 链里——无证请求的 issuer_ski 是空串，
+  写成 `and ... eq "SKI"` 会恒假导致无证请求不匹配、规则失效。
+- SKI 用**大写**（CF 官方示例格式），小写会导致有效证书被误拦。
+- 发卡方 SKI 取自证书 Authority Key Identifier（非 CF API 返回的叶子 `ski` 字段）。
 
 ## 日常运维
 
+- **token 白名单**：`cf_account_token` 已设 IP 白名单，仅可在服务器上调用 CF API；
+  规则变更/重建须 SSH 到服务器执行（token 经 stdin 传入，不落盘）：
+  `ssh workwork-server "cd ~/ops-portal && CF_RULES_TOKEN=\$(cat) python3 pki/cf_edge_setup.py" < ~/cf_token_and_cert/cf_account_token`
 - 新设备：openssl 生成 CSR → API 签发（或面板 Add Certificate）→ portal 证书页登记 → 装证 → p12 按规范归档 `~/cf_token_and_cert/ops.yinghuoren.com/`（命名：用途_持有人-设备）。
 - 吊销：CF 面板 Revoke（或 API 删除）+ portal 证书页置 revoked + 归档目录移除/标记对应 p12。
 - 轮换记录：初代证书 `cert-mbpro-01`（serial `26B7…`）因私钥失效已双端吊销，
   由 `cert-mbpro-02`（serial `197FE164…`）接替，users.json 绑定随之换绑。
-- 规则变更/重建：`CF_RULES_TOKEN=$(cat ~/cf_token_and_cert/cf_account_token) python3 pki/cf_edge_setup.py`（幂等）。

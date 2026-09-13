@@ -28,7 +28,7 @@ TOKEN = os.environ.get("CF_RULES_TOKEN", "")
 ZONE = os.environ.get("CF_ZONE_ID", "3c681cb3e32fb42f0fb9ddd38dfa858f")
 HOSTS = [h.strip() for h in os.environ.get(
     "OPS_DOMAINS", "ops.yinghuoren.com").split(",") if h.strip()]
-ISSUER_SKI = os.environ.get("CF_ISSUER_SKI", "f275e69e4459913f80f4d9a36ba5ae9129c721c6")
+ISSUER_SKI = os.environ.get("CF_ISSUER_SKI", "F275E69E4459913F80F4D9A36BA5AE9129C721C6")
 
 TRANSFORM_DESC = "ops-cert-passthrough"
 WAF_DESC = "ops-mtls-required"
@@ -44,10 +44,14 @@ TRANSFORM_HEADERS = {
 _HOST_SET = " ".join(f'"{h}"' for h in HOSTS)
 _HOST_EXPR = f"http.host in {{ {_HOST_SET} }}"
 
+# 无证时 issuer_ski 为空串：SKI 条件必须用 ne 放在 or 链里，
+# 否则 eq 恒假导致无证请求不匹配、规则失效（实测踩坑）。
+# SKI 用大写（CF 官方示例格式）。
 WAF_EXPRESSION = (
-    f"({_HOST_EXPR} and "
-    f"(not cf.tls_client_auth.cert_verified or cf.tls_client_auth.cert_revoked) "
-    f'and cf.tls_client_auth.cert_issuer_ski eq "{ISSUER_SKI}")'
+    f"({_HOST_EXPR} and ("
+    f"not cf.tls_client_auth.cert_verified "
+    f"or cf.tls_client_auth.cert_revoked "
+    f'or cf.tls_client_auth.cert_issuer_ski ne "{ISSUER_SKI}"))'
 )
 
 
