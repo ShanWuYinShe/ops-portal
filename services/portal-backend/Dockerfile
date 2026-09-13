@@ -36,7 +36,7 @@ RUN sed -i 's#dl-cdn.alpinelinux.org#mirrors.aliyun.com#g' /etc/apk/repositories
     && chown -R appuser:appuser /app
 
 COPY --from=go-builder /build/portal-backend /app/portal-backend
-COPY --from=ui-builder /ui/dist /app/ui
+COPY --from=ui-builder /ui/build /app/ui
 
 WORKDIR /app
 USER appuser

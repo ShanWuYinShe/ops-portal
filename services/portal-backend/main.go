@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -189,8 +191,20 @@ func main() {
 	mux.HandleFunc("POST /api/agent/heartbeat", requireAgentTokenV2(apiAgentHeartbeat))
 	mux.HandleFunc("POST /api/agent/report", requireAgentTokenV2(apiAgentReport))
 
-	// 前端静态页（Docker 构建时把 ui/dist 拷到 /app/ui）
-	mux.Handle("GET /", http.FileServer(http.Dir("/app/ui")))
+	// 前端 SPA（SvelteKit adapter-static 产物，Docker 构建时拷到 /app/ui）。
+	// 文件存在则直出，未知路径回退 index.html（客户端路由 /dashboard 等）。
+	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+		upath := filepath.Clean("/app/ui" + r.URL.Path)
+		if upath != "/app/ui" && !strings.HasPrefix(upath, "/app/ui/") {
+			http.NotFound(w, r)
+			return
+		}
+		if st, err := os.Stat(upath); err == nil && !st.IsDir() {
+			http.ServeFile(w, r, upath)
+			return
+		}
+		http.ServeFile(w, r, "/app/ui/index.html")
+	})
 
 	srv := &http.Server{
 		Addr:              "0.0.0.0:" + port,
