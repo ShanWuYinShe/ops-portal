@@ -154,6 +154,20 @@ portal-agent 默认每 10s（可配 `HEARTBEAT_INTERVAL`；本地 dev compose �
 命令生命周期：`queued → acked（portal-agent 取走）→ done | failed`。
 portal-agent 侧双重白名单：`PORTAL_AGENT_COMPOSE_PROJECTS`（项目）+ `PORTAL_AGENT_DEPLOY_DIRS`（目录映射）。
 
+## 心跳超时告警（portal 侧）
+
+- **agent 掉线/恢复**：portal 看门狗每 10s 扫描心跳新鲜度，超过
+  `AGENT_OFFLINE_AFTER`（默认 60s）无心跳判掉线，恢复即告警恢复。
+  一台 portal-agent 掉线 = 该机所有网站失联，detail 里如实说明。
+- **拨测跃迁**：原生注册站点连续 2 轮拨测失败（滤单次抖动）告警
+  `probe_down`，恢复告警 `probe_up`；可达但健康档劣化（`degraded`/`down`）
+  告警 `probe_degraded`，恢复 ok 告警 `probe_recovered`。
+- 所有告警写审计（action = `alert.*`，随审计保留期清理）；同一
+  kind+subject 在 `ALERT_COOLDOWN`（默认 30m）内不重复。
+- backend 重启后第一轮只建基线，不补发历史跃迁（防重启风暴）。
+- 通知渠道（Telegram/SMTP 等）按 env 接入（`alerts.go senderFromEnv`），
+  未配置时只记录不发送。
+
 ## deploy 路径语义（关键，踩过坑）
 
 `PORTAL_AGENT_DEPLOY_DIRS` 配**宿主机绝对路径**，且 portal-agent 容器须以**同路径只读挂载**

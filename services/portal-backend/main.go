@@ -272,6 +272,8 @@ func main() {
 	}
 	// 原生注册站点的 ops 接口连通拨测（后台循环，结果进统一网站视图）。
 	startProbeLoop()
+	// agent 心跳超时看门狗：online↔offline 跃迁进告警（alerts.go）。
+	startAgentWatchdog()
 	log.Printf("ops-portal backend listening on :%s", port)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)

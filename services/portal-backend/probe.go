@@ -41,6 +41,9 @@ func clearProbe(name string) {
 	probeStore.Lock()
 	defer probeStore.Unlock()
 	delete(probeStore.m, name)
+	probeAlerts.Lock()
+	delete(probeAlerts.m, name)
+	probeAlerts.Unlock()
 }
 
 func probeInterval() time.Duration {
@@ -130,7 +133,7 @@ func probeOne(entry siteEntry, cli *http.Client) probeResult {
 
 var probeNoCertOnce sync.Once
 
-func runProbeOnce() {
+func runProbeOnce(first bool) {
 	var targets []siteEntry
 	for _, e := range listSiteEntries() {
 		if strings.TrimSpace(e.OpsURL) != "" {
@@ -152,6 +155,7 @@ func runProbeOnce() {
 		probeStore.Lock()
 		probeStore.m[e.Name] = res
 		probeStore.Unlock()
+		probeAlertCheck(e.Name, res, first)
 		if !res.Reachable {
 			log.Printf("probe: %s unreachable: %s", e.Name, res.Note)
 		} else if res.Health != "" && res.Health != "ok" {
@@ -162,11 +166,11 @@ func runProbeOnce() {
 
 func startProbeLoop() {
 	go func() {
-		runProbeOnce()
+		runProbeOnce(true) // 首轮为告警基线：只记录当前态，不补发跃迁
 		t := time.NewTicker(probeInterval())
 		defer t.Stop()
 		for range t.C {
-			runProbeOnce()
+			runProbeOnce(false)
 		}
 	}()
 }
