@@ -2,6 +2,8 @@ package main
 
 import (
 	"crypto/tls"
+	"encoding/json"
+	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -18,6 +20,9 @@ type probeResult struct {
 	CheckedAt time.Time
 	LatencyMs int64
 	Note      string
+	// Health 为站点自报的健康档（ok|degraded|starting|down），
+	// 仅 Reachable 时有效；空串 = 2xx 但响应体不可解析（按 ok 显示）。
+	Health string
 }
 
 var probeStore = struct {
@@ -62,6 +67,8 @@ func serviceHTTPClient() (*http.Client, error) {
 }
 
 // probeOne 拨测单个原生注册站点；ops_url 为空由调用方过滤。
+// 2xx 即为可达，同时尽力解析响应体的 status/checks（见 ops-v1-spec.md），
+// 解析失败不影响可达判定（Health 留空，按 ok 显示）。
 func probeOne(entry siteEntry, cli *http.Client) probeResult {
 	url := strings.TrimRight(strings.TrimSpace(entry.OpsURL), "/") + "/ops/v1/health"
 	start := time.Now()
@@ -71,12 +78,54 @@ func probeOne(entry siteEntry, cli *http.Client) probeResult {
 		return probeResult{CheckedAt: time.Now(), LatencyMs: lat, Note: err.Error()}
 	}
 	defer resp.Body.Close()
-	ok := resp.StatusCode/100 == 2
-	note := ""
-	if !ok {
-		note = resp.Status
+	if resp.StatusCode/100 != 2 {
+		return probeResult{Reachable: false, CheckedAt: time.Now(), LatencyMs: lat, Note: resp.Status}
 	}
-	return probeResult{Reachable: ok, CheckedAt: time.Now(), LatencyMs: lat, Note: note}
+	res := probeResult{Reachable: true, CheckedAt: time.Now(), LatencyMs: lat}
+	body, err := io.ReadAll(http.MaxBytesReader(nil, resp.Body, 1<<20))
+	if err != nil {
+		return res
+	}
+	var h struct {
+		OK     bool   `json:"ok"`
+		Status string `json:"status"`
+		Checks []struct {
+			Name   string `json:"name"`
+			OK     bool   `json:"ok"`
+			Detail string `json:"detail"`
+		} `json:"checks"`
+	}
+	if json.Unmarshal(body, &h) != nil {
+		return res
+	}
+	if !h.OK {
+		res.Health = "down"
+		res.Note = "site reports ok:false"
+		return res
+	}
+	switch strings.ToLower(strings.TrimSpace(h.Status)) {
+	case "", "ok":
+		res.Health = "ok"
+	case "degraded", "starting":
+		res.Health = strings.ToLower(strings.TrimSpace(h.Status))
+		var bad []string
+		for _, c := range h.Checks {
+			if !c.OK {
+				if c.Detail != "" {
+					bad = append(bad, c.Name+": "+c.Detail)
+				} else {
+					bad = append(bad, c.Name)
+				}
+			}
+		}
+		if len(bad) > 0 {
+			res.Note = strings.Join(bad, "; ")
+		}
+	default:
+		res.Health = "degraded"
+		res.Note = "unknown status " + strings.TrimSpace(h.Status)
+	}
+	return res
 }
 
 var probeNoCertOnce sync.Once
@@ -105,6 +154,8 @@ func runProbeOnce() {
 		probeStore.Unlock()
 		if !res.Reachable {
 			log.Printf("probe: %s unreachable: %s", e.Name, res.Note)
+		} else if res.Health != "" && res.Health != "ok" {
+			log.Printf("probe: %s reachable but %s: %s", e.Name, res.Health, res.Note)
 		}
 	}
 }

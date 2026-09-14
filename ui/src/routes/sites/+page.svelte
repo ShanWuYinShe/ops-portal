@@ -100,8 +100,14 @@
 						<span class="font-mono text-xs text-ink-muted" title="原生注册的 ops 接口">
 							{site.ops_url}
 						</span>
-						{#if site.reachable === true}
+						{#if site.reachable === true && (!site.health || site.health === 'ok')}
 							<span class="badge bg-ok-soft text-ok" title="portal 拨测 {site.ops_url}/ops/v1/health 通过">可达</span>
+						{:else if site.reachable === true && site.health === 'degraded'}
+							<span class="badge bg-warn-soft text-warn" title="站点自报降级，就绪但有依赖故障">降级</span>
+						{:else if site.reachable === true && site.health === 'starting'}
+							<span class="badge bg-warn-soft text-warn" title="站点自报启动中（迁移/预热），稍后自愈">启动中</span>
+						{:else if site.reachable === true}
+							<span class="badge bg-err-soft text-err" title="站点自报不可服务（ok:false）">故障</span>
 						{:else if site.reachable === false}
 							<span class="badge bg-err-soft text-err" title="portal 拨测失败，检查接口与放行清单">不可达</span>
 						{:else}

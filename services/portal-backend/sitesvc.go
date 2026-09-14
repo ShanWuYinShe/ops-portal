@@ -326,7 +326,10 @@ type siteView struct {
 	Source string `json:"source"`
 	// Reachable: portal 以 service 证书拨测 ops_url 的结果；
 	// nil = 未注册 ops_url 或尚未探测（见 probe.go）。
-	Reachable *bool  `json:"reachable,omitempty"`
+	Reachable *bool `json:"reachable,omitempty"`
+	// Health: 站点自报的健康档（ok|degraded|starting|down），
+	// 仅 Reachable 时有效；空串 = 2xx 但响应体不可解析（按 ok 显示）。
+	Health    string `json:"health,omitempty"`
 	CheckedAt string `json:"checked_at,omitempty"`
 }
 
@@ -402,6 +405,7 @@ func buildSiteViews() ([]siteView, error) {
 			if res, ok := getProbe(v.Name); ok {
 				r := res.Reachable
 				v.Reachable = &r
+				v.Health = res.Health
 				v.CheckedAt = res.CheckedAt.UTC().Format(time.RFC3339)
 			}
 		}

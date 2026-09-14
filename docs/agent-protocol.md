@@ -63,8 +63,9 @@ portal 以**网站**（而非机器或容器）组织被管对象。两条接入
 
 - **放行规则**：仅接受出示 `service` 证书的调用方（校验透传的
   `X-Cert-Serial` 等于 portal service 证书 serial；其余一律 403）。
-- 端点（与 ops.agent.v1 同面，方向相反，由 portal 拉取）：
-  `GET /ops/v1/health`、`GET /ops/v1/status`（站点/容器/版本快照，字段见 spec）。
+- 端点：**只有 `GET /ops/v1/health` 一个**（存活+就绪+依赖明细，字段见 spec）。
+  容器/版本快照是 agent 边车的职责，网站不要重复实现；
+  纯静态站（如 travel）实现零接口，其版本由 agent 的 git 上报覆盖。
 - 接入：portal 签发 `site` 注册证书 → 网站调 `POST /api/site/register`
   登记自己的 ops 接口地址（注册进统一网站视图，`ops_url` 填服务根地址，
   不要带 `/ops/v1` 后缀）→ portal 以 service 证书拨测验证连通，

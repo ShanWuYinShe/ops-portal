@@ -98,3 +98,45 @@ func TestProbeOne(t *testing.T) {
 		t.Fatalf("refused should be unreachable with note: %+v", res)
 	}
 }
+
+// 拨测解析响应体的 status/checks（见 ops-v1-spec.md 判定表）。
+func TestProbeHealthParsing(t *testing.T) {
+	serve := func(body string) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(body))
+		}))
+	}
+
+	cases := []struct {
+		name     string
+		body     string
+		health   string
+		wantNote string // 为空表示不断言 Note
+	}{
+		{"ok", `{"ok":true,"site":"x","status":"ok","checks":[]}`, "ok", ""},
+		{"degraded 带故障项", `{"ok":true,"site":"x","status":"degraded",
+			"checks":[{"name":"postgres","ok":true},{"name":"redis","ok":false,"detail":"timeout"}]}`,
+			"degraded", "redis: timeout"},
+		{"starting", `{"ok":true,"site":"x","status":"starting","checks":[]}`, "starting", ""},
+		{"ok:false 即故障", `{"ok":false,"site":"x","status":"ok"}`, "down", ""},
+		{"非法 status 归一降级", `{"ok":true,"site":"x","status":"whatever"}`, "degraded", ""},
+		{"非 JSON 体仍可达", `not json`, "", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			srv := serve(c.body)
+			defer srv.Close()
+			res := probeOne(siteEntry{Name: "x", OpsURL: srv.URL}, http.DefaultClient)
+			if !res.Reachable {
+				t.Fatalf("2xx must be reachable: %+v", res)
+			}
+			if res.Health != c.health {
+				t.Fatalf("health = %q, want %q (%+v)", res.Health, c.health, res)
+			}
+			if c.wantNote != "" && res.Note != c.wantNote {
+				t.Fatalf("note = %q, want %q", res.Note, c.wantNote)
+			}
+		})
+	}
+}

@@ -85,6 +85,8 @@ export interface SiteOverview {
 	/** portal 拨测 ops_url 的结果；undefined = 未注册 ops_url 或尚未探测 */
 	reachable?: boolean;
 	checked_at?: string;
+	/** 站点自报健康档（ok|degraded|starting|down）；仅 reachable 时有效，空串=体不可解析 */
+	health?: string;
 }
 
 export interface CertRecord {
