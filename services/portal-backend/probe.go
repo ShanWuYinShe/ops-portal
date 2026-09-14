@@ -82,13 +82,8 @@ func probeOne(entry siteEntry, cli *http.Client) probeResult {
 var probeNoCertOnce sync.Once
 
 func runProbeOnce() {
-	reg, err := loadSites()
-	if err != nil {
-		log.Printf("probe: load sites failed: %v", err)
-		return
-	}
 	var targets []siteEntry
-	for _, e := range reg.Sites {
+	for _, e := range listSiteEntries() {
 		if strings.TrimSpace(e.OpsURL) != "" {
 			targets = append(targets, e)
 		}

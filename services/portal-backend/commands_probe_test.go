@@ -13,53 +13,60 @@ func TestCommandTTLAndPrune(t *testing.T) {
 	t.Setenv("DATA_DIR", dir)
 
 	old := time.Now().Add(-25 * time.Hour).UTC().Format(time.RFC3339)
-	fresh := time.Now().UTC().Format(time.RFC3339)
-	s := &commandStore{Commands: []portalCommand{
-		{ID: "cmd-old", AgentID: "a1", Action: "restart", Service: "nginx", Status: "queued", CreatedAt: old},
-		{ID: "cmd-new", AgentID: "a1", Action: "restart", Service: "nginx", Status: "queued", CreatedAt: fresh},
-	}}
-	if err := saveCommands(s); err != nil {
-		t.Fatalf("save: %v", err)
+	oldCmd, err := enqueueCommand(portalCommand{AgentID: "a1", Action: "restart", Service: "nginx"})
+	if err != nil {
+		t.Fatalf("enqueue old: %v", err)
+	}
+	newCmd, err := enqueueCommand(portalCommand{AgentID: "a1", Action: "restart", Service: "nginx"})
+	if err != nil {
+		t.Fatalf("enqueue new: %v", err)
+	}
+	db, err := getDB()
+	if err != nil {
+		t.Fatalf("db: %v", err)
+	}
+	// 把第一条的人工调老 25 小时（ enqueue 统一写 now）
+	if _, err := db.Exec(`UPDATE commands SET created_at=? WHERE id=?`, old, oldCmd.ID); err != nil {
+		t.Fatalf("age: %v", err)
 	}
 	got := takeCommands("a1")
-	if len(got) != 1 || got[0].ID != "cmd-new" {
+	if len(got) != 1 || got[0].ID != newCmd.ID {
 		t.Fatalf("take = %+v", got)
 	}
-	after, _ := loadCommands()
 	statusOf := map[string]string{}
-	for _, c := range after.Commands {
+	for _, c := range listCommands("a1") {
 		statusOf[c.ID] = c.Status
 	}
-	if statusOf["cmd-old"] != "expired" || statusOf["cmd-new"] != "acked" {
+	if statusOf[oldCmd.ID] != "expired" || statusOf[newCmd.ID] != "acked" {
 		t.Fatalf("status = %v", statusOf)
 	}
 
-	// 裁剪：505 条终结 + 2 条 queued，再入队一条后终结只剩 500
-	var cmds []portalCommand
+	// 裁剪：505 条终结 + 2 条 queued/acked，再入队一条后终结只剩 500
 	for i := 0; i < 505; i++ {
-		cmds = append(cmds, portalCommand{ID: "t", AgentID: "a", Action: "restart", Service: "s", Status: "done", CreatedAt: fresh})
+		c, err := enqueueCommand(portalCommand{AgentID: "a", Action: "restart", Service: "s"})
+		if err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		if _, err := db.Exec(`UPDATE commands SET status='done' WHERE id=?`, c.ID); err != nil {
+			t.Fatalf("seed status: %v", err)
+		}
 	}
-	cmds = append(cmds,
-		portalCommand{ID: "q1", AgentID: "a", Action: "restart", Service: "s", Status: "queued", CreatedAt: fresh},
-		portalCommand{ID: "q2", AgentID: "a", Action: "restart", Service: "s", Status: "acked", CreatedAt: fresh},
-	)
-	if err := saveCommands(&commandStore{Commands: cmds}); err != nil {
-		t.Fatalf("save2: %v", err)
+	if _, err := enqueueCommand(portalCommand{AgentID: "a", Action: "restart", Service: "s"}); err != nil {
+		t.Fatalf("seed q1: %v", err)
 	}
 	if _, err := enqueueCommand(portalCommand{AgentID: "a", Action: "restart", Service: "s"}); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
-	cur, _ := loadCommands()
-	var terminal, queued int
-	for _, c := range cur.Commands {
-		if c.Status == "queued" || c.Status == "acked" {
-			queued++
-		} else {
-			terminal++
-		}
+	var terminal, pending int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM commands WHERE status NOT IN ('queued','acked')`).Scan(&terminal); err != nil {
+		t.Fatalf("count terminal: %v", err)
 	}
-	if terminal != maxTerminalCommands || queued != 3 {
-		t.Fatalf("terminal=%d queued=%d", terminal, queued)
+	if err := db.QueryRow(`SELECT COUNT(*) FROM commands WHERE status IN ('queued','acked')`).Scan(&pending); err != nil {
+		t.Fatalf("count pending: %v", err)
+	}
+	// pending：a1 的 acked + expired？expired 属终结侧；a1 留 acked(1) + a 侧 q1 与末条(2) = 3
+	if terminal != maxTerminalCommands || pending != 3 {
+		t.Fatalf("terminal=%d pending=%d", terminal, pending)
 	}
 }
 

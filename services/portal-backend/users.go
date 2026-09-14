@@ -5,26 +5,88 @@ import (
 	"strings"
 )
 
-// 用户与证书绑定管理（admin）：给 users.json 一个管理面，
+// 用户与证书绑定管理（admin）：给 users 表一个管理面，
 // 不再靠 SSH 上服务器手改。用户凭绑定的证书登录（见 currentUser）。
 
-func saveUsers(s *userStore) error { return atomicWriteJSON(usersPath(), s, 0600) }
+func getUserByCertID(certID string) (portalUser, bool) {
+	db, err := getDB()
+	if err != nil {
+		return portalUser{}, false
+	}
+	u := portalUser{}
+	err = db.QueryRow(`SELECT username, role, cert_id FROM users WHERE cert_id=? LIMIT 1`, certID).
+		Scan(&u.Username, &u.Role, &u.CertID)
+	if err != nil {
+		return portalUser{}, false
+	}
+	return u, true
+}
+
+func listUsers() []portalUser {
+	db, err := getDB()
+	if err != nil {
+		return []portalUser{}
+	}
+	rows, err := db.Query(`SELECT username, role, cert_id FROM users ORDER BY username`)
+	if err != nil {
+		return []portalUser{}
+	}
+	defer rows.Close()
+	out := []portalUser{}
+	for rows.Next() {
+		u := portalUser{}
+		if err := rows.Scan(&u.Username, &u.Role, &u.CertID); err != nil {
+			return []portalUser{}
+		}
+		out = append(out, u)
+	}
+	return out
+}
+
+func getUserRole(username string) (string, bool) {
+	db, err := getDB()
+	if err != nil {
+		return "", false
+	}
+	var role string
+	if err := db.QueryRow(`SELECT role FROM users WHERE username=?`, username).Scan(&role); err != nil {
+		return "", false
+	}
+	return role, true
+}
+
+func getUserCertID(username string) string {
+	db, err := getDB()
+	if err != nil {
+		return ""
+	}
+	var id string
+	if err := db.QueryRow(`SELECT cert_id FROM users WHERE username=?`, username).Scan(&id); err != nil {
+		return ""
+	}
+	return id
+}
+
+func upsertUser(username, role, certID string) {
+	db, err := getDB()
+	if err != nil {
+		return
+	}
+	_, _ = db.Exec(`INSERT INTO users (username, role, cert_id) VALUES (?,?,?)
+		ON CONFLICT(username) DO UPDATE SET role=excluded.role, cert_id=excluded.cert_id`,
+		username, role, certID)
+}
+
+func deleteUser(username string) {
+	db, err := getDB()
+	if err != nil {
+		return
+	}
+	_, _ = db.Exec(`DELETE FROM users WHERE username=?`, username)
+}
 
 func validRole(role string) bool {
 	return role == "ops.admin" || role == "ops.operator" || role == "ops.viewer"
-}
-
-func certIDExists(id string) bool {
-	s, err := loadCerts()
-	if err != nil {
-		return false
-	}
-	for _, c := range s.Certs {
-		if c.ID == id {
-			return true
-		}
-	}
-	return false
 }
 
 // GET /api/portal/users（admin）—— 用户列表（含绑定证书 label，方便认人）。
@@ -32,25 +94,30 @@ func apiUsersList(w http.ResponseWriter, r *http.Request) {
 	if !mustMethod(w, r, http.MethodGet) {
 		return
 	}
-	usersMu.Lock()
-	s, err := loadUsers()
-	usersMu.Unlock()
+	db, err := getDB()
 	if err != nil {
 		writeInternalError(w, err)
 		return
 	}
-	certs, _ := loadCerts()
-	labelOf := map[string]string{}
-	for _, c := range certs.Certs {
-		labelOf[c.ID] = c.Label
+	rows, err := db.Query(`SELECT u.username, u.role, u.cert_id, COALESCE(c.label,'')
+		FROM users u LEFT JOIN certs c ON c.id = u.cert_id ORDER BY u.username`)
+	if err != nil {
+		writeInternalError(w, err)
+		return
 	}
+	defer rows.Close()
 	type userView struct {
 		portalUser
 		CertLabel string `json:"cert_label"`
 	}
-	out := make([]userView, 0, len(s.Users))
-	for _, u := range s.Users {
-		out = append(out, userView{portalUser: u, CertLabel: labelOf[u.CertID]})
+	out := []userView{}
+	for rows.Next() {
+		var v userView
+		if err := rows.Scan(&v.Username, &v.Role, &v.CertID, &v.CertLabel); err != nil {
+			writeInternalError(w, err)
+			return
+		}
+		out = append(out, v)
 	}
 	writeOK(w, map[string]any{"users": out})
 }
@@ -76,38 +143,18 @@ func apiUsersUpsert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := actorOf(r)
-	usersMu.Lock()
-	defer usersMu.Unlock()
-	// 锁顺序固定 usersMu → certsMu（与 currentUser 一致），防死锁。
 	if !certIDExists(certID) {
 		writeError(w, http.StatusBadRequest, "unknown cert_id")
 		return
 	}
-	s, err := loadUsers()
-	if err != nil {
-		writeInternalError(w, err)
-		return
-	}
-	prevRole := ""
-	found := false
-	for i := range s.Users {
-		if s.Users[i].Username == username {
-			prevRole = s.Users[i].Role
-			s.Users[i].Role, s.Users[i].CertID = role, certID
-			found = true
-		}
-	}
-	if !found {
-		s.Users = append(s.Users, portalUser{Username: username, Role: role, CertID: certID})
-	}
-	// 禁止把自己（或最后一个 admin）降权：防锁死管理面。
-	if prevRole == "ops.admin" && role != "ops.admin" && !anotherAdmin(s, username) {
+	prevRole, _ := getUserRole(username)
+	prevCert := getUserCertID(username)
+	upsertUser(username, role, certID)
+	// 禁止把最后一个 admin 降权：防锁死管理面（回滚本次写入）。
+	if prevRole == "ops.admin" && role != "ops.admin" && !anotherAdmin(username) {
+		upsertUser(username, prevRole, prevCert)
 		audit(u.Username, "", "users.upsert", username, "fail", "refuse demoting last admin", r.RemoteAddr)
 		writeError(w, http.StatusBadRequest, "refuse demoting last admin")
-		return
-	}
-	if err := saveUsers(s); err != nil {
-		writeInternalError(w, err)
 		return
 	}
 	audit(u.Username, "", "users.upsert", username, "ok", role, r.RemoteAddr)
@@ -135,46 +182,30 @@ func apiUsersRemove(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "refuse removing self")
 		return
 	}
-	usersMu.Lock()
-	defer usersMu.Unlock()
-	s, err := loadUsers()
-	if err != nil {
-		writeInternalError(w, err)
-		return
-	}
-	kept := s.Users[:0]
-	removedRole := ""
-	for _, x := range s.Users {
-		if x.Username == username {
-			removedRole = x.Role
-			continue
-		}
-		kept = append(kept, x)
-	}
-	if removedRole == "" {
+	removedRole, ok := getUserRole(username)
+	if !ok {
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
-	s.Users = kept
-	if removedRole == "ops.admin" && !anotherAdmin(s, "") {
+	if removedRole == "ops.admin" && !anotherAdmin(username) {
 		audit(u.Username, "", "users.remove", username, "fail", "refuse removing last admin", r.RemoteAddr)
 		writeError(w, http.StatusBadRequest, "refuse removing last admin")
 		return
 	}
-	if err := saveUsers(s); err != nil {
-		writeInternalError(w, err)
-		return
-	}
+	deleteUser(username)
 	audit(u.Username, "", "users.remove", username, "ok", "", r.RemoteAddr)
 	writeOK(w, map[string]any{"username": username, "removed": true})
 }
 
 // anotherAdmin 除外用户之外是否还有 admin。
-func anotherAdmin(s *userStore, except string) bool {
-	for _, x := range s.Users {
-		if x.Username != except && x.Role == "ops.admin" {
-			return true
-		}
+func anotherAdmin(except string) bool {
+	db, err := getDB()
+	if err != nil {
+		return false
 	}
-	return false
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM users WHERE role='ops.admin' AND username <> ?`, except).Scan(&n); err != nil {
+		return false
+	}
+	return n > 0
 }

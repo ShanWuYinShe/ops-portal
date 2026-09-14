@@ -196,6 +196,12 @@ func requireAgentTokenV2(next http.HandlerFunc) http.HandlerFunc {
 func main() {
 	port := getEnv("PORTAL_BACKEND_PORT", "8319")
 
+	// 数据库先行：打不开直接 fail fast；旧 JSON 有数据则一次性导入。
+	if _, err := getDB(); err != nil {
+		log.Fatalf("portal: open db failed: %v", err)
+	}
+	purgeOldAudit()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/portal/health", apiPortalHealth)
 	mux.HandleFunc("GET /api/portal/whoami", requireRole("ops.viewer", apiPortalWhoami))
@@ -216,8 +222,9 @@ func main() {
 	mux.HandleFunc("GET /api/portal/commands", requireRole("ops.viewer", apiCommandsList))
 	mux.HandleFunc("POST /api/portal/commands/enqueue", requireRole("ops.operator", apiCommandsEnqueue))
 
-	// 审计（admin）
+	// 审计（admin）+ 在线备份（admin）
 	mux.HandleFunc("GET /api/portal/audit", requireRole("ops.admin", apiAuditList))
+	mux.HandleFunc("POST /api/portal/backup", requireRole("ops.admin", apiBackup))
 
 	// 用户与证书绑定（admin）
 	mux.HandleFunc("GET /api/portal/users", requireRole("ops.admin", apiUsersList))

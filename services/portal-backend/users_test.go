@@ -77,12 +77,9 @@ func TestUsersUpsertRemove(t *testing.T) {
 func TestSitesUnregister(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("DATA_DIR", dir)
-	sitesMu.Lock()
-	if err := saveSites(&siteRegistry{Sites: []siteEntry{{Name: "demo", OpsURL: "http://x"}}}); err != nil {
-		sitesMu.Unlock()
+	if err := upsertSiteEntry(siteEntry{Name: "demo", OpsURL: "http://x"}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	sitesMu.Unlock()
 	probeStore.Lock()
 	probeStore.m["demo"] = probeResult{Reachable: true}
 	probeStore.Unlock()
@@ -95,9 +92,8 @@ func TestSitesUnregister(t *testing.T) {
 	if _, ok := getProbe("demo"); ok {
 		t.Fatal("probe cache should be cleared")
 	}
-	reg, _ := loadSites()
-	if len(reg.Sites) != 0 {
-		t.Fatalf("sites = %+v", reg.Sites)
+	if got := listSiteEntries(); len(got) != 0 {
+		t.Fatalf("sites = %+v", got)
 	}
 
 	rec2, req2 := adminReq(t, http.MethodPost, `{"name":"demo"}`)

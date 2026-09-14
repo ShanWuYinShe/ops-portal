@@ -1,14 +1,11 @@
 package main
 
 import (
-	"encoding/json"
 	"log"
-	"os"
-	"sync"
 	"time"
 )
 
-// 审计日志：JSONL append，只追加不修改。
+// 审计日志（SQLite audit 表）：只追加不修改，保留期见 AUDIT_RETENTION_DAYS。
 
 type auditEntry struct {
 	At       string `json:"at"`
@@ -21,38 +18,16 @@ type auditEntry struct {
 	IP       string `json:"remote_ip"` // 对端地址
 }
 
-var auditMu sync.Mutex
-
-func auditPath() string {
-	return dataDir() + "/audit.jsonl"
-}
-
 func audit(actor, certDesc, action, object, result, note, ip string) {
-	e := auditEntry{
-		At:       time.Now().UTC().Format(time.RFC3339),
-		Actor:    actor,
-		CertDesc: certDesc,
-		Action:   action,
-		Object:   object,
-		Result:   result,
-		Note:     note,
-		IP:       ip,
-	}
-	data, err := json.Marshal(e)
+	db, err := getDB()
 	if err != nil {
-		log.Printf("audit: marshal failed: %v", err)
+		log.Printf("audit: open db failed: %v", err)
 		return
 	}
-	auditMu.Lock()
-	defer auditMu.Unlock()
-	f, err := os.OpenFile(auditPath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	_, err = db.Exec(`INSERT INTO audit (at,actor,cert,action,object,result,note,remote_ip)
+		VALUES (?,?,?,?,?,?,?,?)`,
+		time.Now().UTC().Format(time.RFC3339), actor, certDesc, action, object, result, note, ip)
 	if err != nil {
-		log.Printf("audit: open failed: %v", err)
-		return
-	}
-	defer f.Close()
-	data = append(data, '\n')
-	if _, err := f.Write(data); err != nil {
-		log.Printf("audit: write failed: %v", err)
+		log.Printf("audit: insert failed: %v", err)
 	}
 }

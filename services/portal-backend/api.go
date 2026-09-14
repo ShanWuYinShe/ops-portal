@@ -267,3 +267,20 @@ func apiAuditList(w http.ResponseWriter, r *http.Request) {
 	entries := readAuditTail(200)
 	writeOK(w, map[string]any{"entries": entries})
 }
+
+// POST /api/portal/backup（admin）—— 在线备份数据库快照到 data/backups/。
+// cron 调这个接口即可（持 human 证书），只留最新 14 份。
+func apiBackup(w http.ResponseWriter, r *http.Request) {
+	if !mustMethod(w, r, http.MethodPost) {
+		return
+	}
+	u := actorOf(r)
+	name, err := backupDB()
+	if err != nil {
+		audit(u.Username, "", "db.backup", "", "fail", err.Error(), r.RemoteAddr)
+		writeInternalError(w, err)
+		return
+	}
+	audit(u.Username, "", "db.backup", name, "ok", "", r.RemoteAddr)
+	writeOK(w, map[string]any{"backup": name})
+}

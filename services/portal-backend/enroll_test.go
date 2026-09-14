@@ -50,17 +50,13 @@ func TestIssueConsumeEnroll(t *testing.T) {
 	}
 
 	// 过期失败：回写一个已过期的 enroll 记录
-	s, err := loadTokens()
+	db, err := getDB()
 	if err != nil {
-		t.Fatalf("load: %v", err)
+		t.Fatalf("db: %v", err)
 	}
-	for i := range s.Tokens {
-		if s.Tokens[i].Kind == "enroll" && !s.Tokens[i].Used {
-			s.Tokens[i].ExpiresAt = time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
-		}
-	}
-	if err := saveTokens(s); err != nil {
-		t.Fatalf("save: %v", err)
+	if _, err := db.Exec(`UPDATE agent_tokens SET expires_at=? WHERE kind='enroll' AND used=0`,
+		time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)); err != nil {
+		t.Fatalf("age: %v", err)
 	}
 	if _, err := consumeEnrollToken(plain2, "agent-test-02"); err == nil {
 		t.Fatal("expired should fail")

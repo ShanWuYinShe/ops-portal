@@ -1,14 +1,13 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
-	"os"
-	"sort"
-	"sync"
 	"time"
 )
 
-// 命令队列：portal 入队 → agent 心跳取走 → agent 本地执行 → 下次心跳回传结果。
+// 命令队列（SQLite commands 表）：portal 入队 → agent 心跳取走 →
+// agent 本地执行 → 下次心跳回传结果。
 // 白名单动作：start / stop / restart（容器名=compose service 名）；
 // deploy（按 compose 项目重建受影响服务，project+targets）。
 
@@ -19,43 +18,50 @@ type portalCommand struct {
 	Service   string   `json:"service"`
 	Project   string   `json:"project"`
 	Targets   []string `json:"targets"`
-	Status    string   `json:"status"` // queued / acked / done / failed
+	Status    string   `json:"status"` // queued / acked / done / failed / expired
 	CreatedBy string   `json:"created_by"`
 	CreatedAt string   `json:"created_at"`
 	Result    string   `json:"result"`
 }
 
-type commandStore struct {
-	Commands []portalCommand `json:"commands"`
+const commandColumns = `id,agent_id,action,service,project,targets,status,created_by,created_at,result`
+
+func marshalTargets(t []string) (string, error) {
+	if t == nil {
+		return "[]", nil
+	}
+	b, err := json.Marshal(t)
+	return string(b), err
 }
 
-var commandsMu sync.Mutex
-
-func commandsPath() string {
-	return dataDir() + "/commands.json"
+func unmarshalTargets(s string) []string {
+	var out []string
+	if s == "" || json.Unmarshal([]byte(s), &out) != nil {
+		return []string{}
+	}
+	if out == nil {
+		return []string{}
+	}
+	return out
 }
 
-func loadCommands() (*commandStore, error) {
-	s := &commandStore{}
-	if err := readJSON(commandsPath(), s); err != nil {
-		if os.IsNotExist(err) {
-			return &commandStore{}, nil
-		}
+func scanCommand(row interface {
+	Scan(dest ...any) error
+}) (*portalCommand, error) {
+	c := &portalCommand{}
+	var targets string
+	err := row.Scan(&c.ID, &c.AgentID, &c.Action, &c.Service, &c.Project,
+		&targets, &c.Status, &c.CreatedBy, &c.CreatedAt, &c.Result)
+	if err != nil {
 		return nil, err
 	}
-	if s.Commands == nil {
-		s.Commands = []portalCommand{}
-	}
-	return s, nil
-}
-
-func saveCommands(s *commandStore) error {
-	return atomicWriteJSON(commandsPath(), s, 0600)
+	c.Targets = unmarshalTargets(targets)
+	return c, nil
 }
 
 var validActions = map[string]bool{"start": true, "stop": true, "restart": true, "deploy": true}
 
-// 已终结（done/failed/expired）命令的保留条数上限，防 commands.json 无限增长。
+// 已终结（done/failed/expired）命令的保留条数上限，防表无限增长。
 const maxTerminalCommands = 500
 
 // commandTTL 排队命令有效期：agent 长时间离线后上线不再执行过期命令。
@@ -91,66 +97,75 @@ func enqueueCommand(cmd portalCommand) (*portalCommand, error) {
 	} else if cmd.Service == "" {
 		return nil, errors.New("service required")
 	}
-	commandsMu.Lock()
-	defer commandsMu.Unlock()
-	s, err := loadCommands()
+	db, err := getDB()
 	if err != nil {
 		return nil, err
 	}
 	cmd.ID = "cmd-" + time.Now().UTC().Format("20060102-150405") + "-" + randHex(4)
 	cmd.Status = "queued"
 	cmd.CreatedAt = time.Now().UTC().Format(time.RFC3339)
-	s.Commands = append(s.Commands, cmd)
-	pruneCommands(s)
-	if err := saveCommands(s); err != nil {
+	tg, err := marshalTargets(cmd.Targets)
+	if err != nil {
 		return nil, err
 	}
+	if _, err := db.Exec(`INSERT INTO commands (`+commandColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+		cmd.ID, cmd.AgentID, cmd.Action, cmd.Service, cmd.Project, tg,
+		cmd.Status, cmd.CreatedBy, cmd.CreatedAt, cmd.Result); err != nil {
+		return nil, err
+	}
+	pruneCommands()
 	return &cmd, nil
 }
 
 // pruneCommands 裁剪终结命令：queued/acked 全留，done/failed/expired 只留最新 500 条。
-func pruneCommands(s *commandStore) {
-	var pending, terminal []portalCommand
-	for _, c := range s.Commands {
-		if c.Status == "queued" || c.Status == "acked" {
-			pending = append(pending, c)
-		} else {
-			terminal = append(terminal, c)
-		}
+func pruneCommands() {
+	db, err := getDB()
+	if err != nil {
+		return
 	}
-	if len(terminal) > maxTerminalCommands {
-		terminal = terminal[len(terminal)-maxTerminalCommands:]
-	}
-	s.Commands = append(pending, terminal...)
+	_, _ = db.Exec(`DELETE FROM commands WHERE status NOT IN ('queued','acked') AND id NOT IN (
+		SELECT id FROM commands WHERE status NOT IN ('queued','acked')
+		ORDER BY created_at DESC LIMIT ?)`, maxTerminalCommands)
 }
 
 // takeCommands 取走该 agent 的 queued 命令并标 acked（心跳时调用）。
 // 已过有效期的 queued 命令标 expired，不再下发。
 func takeCommands(agentID string) []portalCommand {
-	commandsMu.Lock()
-	defer commandsMu.Unlock()
-	s, err := loadCommands()
+	db, err := getDB()
 	if err != nil {
 		return nil
 	}
+	rows, err := db.Query(`SELECT `+commandColumns+` FROM commands WHERE agent_id=? AND status='queued'`, agentID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	type pending struct {
+		id, createdAt string
+		cmd           portalCommand
+	}
+	var list []pending
+	for rows.Next() {
+		c, err := scanCommand(rows)
+		if err != nil {
+			return nil
+		}
+		list = append(list, pending{id: c.ID, createdAt: c.CreatedAt, cmd: *c})
+	}
+	rows.Close()
 	now := time.Now()
 	var out []portalCommand
-	changed := false
-	for i := range s.Commands {
-		if s.Commands[i].AgentID == agentID && s.Commands[i].Status == "queued" {
-			if commandExpiredAt(s.Commands[i].CreatedAt, now) {
-				s.Commands[i].Status = "expired"
-				s.Commands[i].Result = "expired: queued beyond TTL, not executed"
-				changed = true
-				continue
-			}
-			s.Commands[i].Status = "acked"
-			out = append(out, s.Commands[i])
-			changed = true
+	for _, p := range list {
+		if commandExpiredAt(p.createdAt, now) {
+			_, _ = db.Exec(`UPDATE commands SET status='expired', result=? WHERE id=?`,
+				"expired: queued beyond TTL, not executed", p.id)
+			continue
 		}
-	}
-	if changed {
-		_ = saveCommands(s)
+		if _, err := db.Exec(`UPDATE commands SET status='acked' WHERE id=? AND status='queued'`, p.id); err != nil {
+			continue
+		}
+		p.cmd.Status = "acked"
+		out = append(out, p.cmd)
 	}
 	return out
 }
@@ -160,38 +175,45 @@ func reportCommand(agentID, id, status, result string) error {
 	if status != "done" && status != "failed" {
 		return errors.New("invalid status")
 	}
-	commandsMu.Lock()
-	defer commandsMu.Unlock()
-	s, err := loadCommands()
+	db, err := getDB()
 	if err != nil {
 		return err
 	}
-	for i := range s.Commands {
-		if s.Commands[i].ID == id && s.Commands[i].AgentID == agentID {
-			s.Commands[i].Status = status
-			s.Commands[i].Result = result
-			return saveCommands(s)
-		}
+	res, err := db.Exec(`UPDATE commands SET status=?, result=? WHERE id=? AND agent_id=?`,
+		status, result, id, agentID)
+	if err != nil {
+		return err
 	}
-	return errors.New("not found")
+	if n, _ := res.RowsAffected(); n == 0 {
+		return errors.New("not found")
+	}
+	return nil
 }
 
 func listCommands(agentID string) []portalCommand {
-	commandsMu.Lock()
-	defer commandsMu.Unlock()
-	s, err := loadCommands()
+	db, err := getDB()
 	if err != nil {
 		return nil
 	}
-	var out []portalCommand
-	for _, c := range s.Commands {
-		if agentID == "" || c.AgentID == agentID {
-			out = append(out, c)
-		}
+	q := `SELECT ` + commandColumns + ` FROM commands `
+	var args []any
+	if agentID != "" {
+		q += `WHERE agent_id=? `
+		args = append(args, agentID)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt > out[j].CreatedAt })
-	if len(out) > 100 {
-		out = out[:100]
+	q += `ORDER BY created_at DESC LIMIT 100`
+	rs, err := db.Query(q, args...)
+	if err != nil {
+		return nil
+	}
+	defer rs.Close()
+	out := []portalCommand{}
+	for rs.Next() {
+		c, err := scanCommand(rs)
+		if err != nil {
+			return nil
+		}
+		out = append(out, *c)
 	}
 	return out
 }

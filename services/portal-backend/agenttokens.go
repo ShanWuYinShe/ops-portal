@@ -2,15 +2,13 @@ package main
 
 import (
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"errors"
-	"os"
-	"sort"
-	"sync"
 	"time"
 )
 
-// agent token 库：provision 时签发，一次显示，可轮换可吊销。
+// agent token 库（SQLite agent_tokens 表）：provision 时签发，一次显示，可轮换可吊销。
 // token 只存 SHA256 摘要（防库泄露直接可用），签发时返回明文一次。
 
 type agentToken struct {
@@ -25,39 +23,24 @@ type agentToken struct {
 	Used      bool   `json:"used,omitempty"`
 }
 
-type tokenStore struct {
-	Tokens []agentToken `json:"tokens"`
-}
-
-var tokensMu sync.Mutex
-
-func tokensPath() string {
-	return dataDir() + "/agent_tokens.json"
-}
-
-func loadTokens() (*tokenStore, error) {
-	s := &tokenStore{}
-	if err := readJSON(tokensPath(), s); err != nil {
-		if os.IsNotExist(err) {
-			return &tokenStore{}, nil
-		}
+func scanToken(row interface {
+	Scan(dest ...any) error
+}) (*agentToken, error) {
+	t := &agentToken{}
+	var revoked, used int
+	err := row.Scan(&t.ID, &t.AgentID, &t.Hash, &t.CreatedBy, &t.CreatedAt,
+		&revoked, &t.Kind, &t.ExpiresAt, &used)
+	if err != nil {
 		return nil, err
 	}
-	if s.Tokens == nil {
-		s.Tokens = []agentToken{}
+	t.Revoked, t.Used = revoked != 0, used != 0
+	if t.Kind == "" {
+		t.Kind = "agent" // 旧库存量正式 token 无 kind 字段
 	}
-	// 旧库存量正式 token 无 kind 字段，默认 agent
-	for i := range s.Tokens {
-		if s.Tokens[i].Kind == "" {
-			s.Tokens[i].Kind = "agent"
-		}
-	}
-	return s, nil
+	return t, nil
 }
 
-func saveTokens(s *tokenStore) error {
-	return atomicWriteJSON(tokensPath(), s, 0600)
-}
+const tokenColumns = `id,agent_id,hash,created_by,created_at,revoked,kind,expires_at,used`
 
 func randHex(n int) string {
 	b := make([]byte, n)
@@ -67,27 +50,28 @@ func randHex(n int) string {
 	return hex.EncodeToString(b)
 }
 
+func insertToken(t agentToken) error {
+	db, err := getDB()
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`INSERT INTO agent_tokens (`+tokenColumns+`) VALUES (?,?,?,?,?,?,?,?,?)`,
+		t.ID, t.AgentID, t.Hash, t.CreatedBy, t.CreatedAt,
+		boolInt(t.Revoked), t.Kind, t.ExpiresAt, boolInt(t.Used))
+	return err
+}
+
 // issueAgentToken 签发 token，返回明文（只此一次）与记录。
 func issueAgentToken(agentID, createdBy string) (string, *agentToken, error) {
 	if agentID == "" {
 		return "", nil, errors.New("agent_id required")
 	}
 	plain := "opsa_" + randHex(24)
-	tokensMu.Lock()
-	defer tokensMu.Unlock()
-	s, err := loadTokens()
-	if err != nil {
-		return "", nil, err
-	}
 	t := agentToken{
-		ID:        "tok-" + randHex(6),
-		AgentID:   agentID,
-		Hash:      sha256Hex(plain),
-		CreatedBy: createdBy,
-		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		ID: "tok-" + randHex(6), AgentID: agentID, Hash: sha256Hex(plain),
+		CreatedBy: createdBy, CreatedAt: time.Now().UTC().Format(time.RFC3339), Kind: "agent",
 	}
-	s.Tokens = append(s.Tokens, t)
-	if err := saveTokens(s); err != nil {
+	if err := insertToken(t); err != nil {
 		return "", nil, err
 	}
 	return plain, &t, nil
@@ -101,104 +85,111 @@ func issueEnrollToken(agentID, createdBy string) (string, *agentToken, error) {
 		return "", nil, errors.New("agent_id required")
 	}
 	plain := "enroll_" + randHex(24)
-	tokensMu.Lock()
-	defer tokensMu.Unlock()
-	s, err := loadTokens()
-	if err != nil {
-		return "", nil, err
-	}
 	t := agentToken{
-		ID:        "enr-" + randHex(6),
-		AgentID:   agentID,
-		Hash:      sha256Hex(plain),
-		CreatedBy: createdBy,
-		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		ID: "enr-" + randHex(6), AgentID: agentID, Hash: sha256Hex(plain),
+		CreatedBy: createdBy, CreatedAt: time.Now().UTC().Format(time.RFC3339),
 		Kind:      "enroll",
 		ExpiresAt: time.Now().Add(30 * time.Minute).UTC().Format(time.RFC3339),
 	}
-	s.Tokens = append(s.Tokens, t)
-	if err := saveTokens(s); err != nil {
+	if err := insertToken(t); err != nil {
 		return "", nil, err
 	}
 	return plain, &t, nil
 }
 
+func findTokenByHash(h string) (*agentToken, error) {
+	db, err := getDB()
+	if err != nil {
+		return nil, err
+	}
+	t, err := scanToken(db.QueryRow(`SELECT `+tokenColumns+` FROM agent_tokens WHERE hash=? LIMIT 1`, h))
+	if err == sql.ErrNoRows {
+		return nil, errors.New("invalid token")
+	}
+	return t, err
+}
+
 // consumeEnrollToken 校验并核销一次性注册令牌，返回绑定的 agent_id。
 // 过期/已用/已吊销/串号一律失败（调用方对客户端统一报 invalid，不区分原因）。
+// 核销用条件 UPDATE 保证并发下单次语义。
 func consumeEnrollToken(plain, agentID string) (string, error) {
-	tokensMu.Lock()
-	defer tokensMu.Unlock()
-	s, err := loadTokens()
+	db, err := getDB()
 	if err != nil {
 		return "", err
 	}
 	h := sha256Hex(plain)
-	for i := range s.Tokens {
-		t := &s.Tokens[i]
-		if t.Kind != "enroll" || t.Revoked || t.Used {
-			continue
-		}
-		if !constantTimeEqual(t.Hash, h) {
-			continue
-		}
-		if t.ExpiresAt != "" {
-			if exp, err := time.Parse(time.RFC3339, t.ExpiresAt); err == nil && time.Now().After(exp) {
-				return "", errors.New("enroll token expired")
-			}
-		}
-		if t.AgentID != agentID {
-			return "", errors.New("agent_id mismatch")
-		}
-		t.Used = true
-		if err := saveTokens(s); err != nil {
-			return "", err
-		}
-		return t.AgentID, nil
+	t, err := findTokenByHash(h)
+	if err != nil {
+		return "", errors.New("invalid enroll token")
 	}
-	return "", errors.New("invalid enroll token")
+	if t.Kind != "enroll" || t.Revoked || t.Used {
+		return "", errors.New("invalid enroll token")
+	}
+	if !constantTimeEqual(t.Hash, h) {
+		return "", errors.New("invalid enroll token")
+	}
+	if t.ExpiresAt != "" {
+		if exp, err := time.Parse(time.RFC3339, t.ExpiresAt); err == nil && time.Now().After(exp) {
+			return "", errors.New("enroll token expired")
+		}
+	}
+	if t.AgentID != agentID {
+		return "", errors.New("agent_id mismatch")
+	}
+	res, err := db.Exec(`UPDATE agent_tokens SET used=1 WHERE id=? AND used=0`, t.ID)
+	if err != nil {
+		return "", err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return "", errors.New("invalid enroll token") // 并发重放：已被核销
+	}
+	return t.AgentID, nil
 }
 
-// validAgentToken 校验 token 明文是否有效（未吊销）。
+// validAgentToken 校验 token 明文是否有效（未吊销；enroll 令牌不可作正式 token）。
 func validAgentToken(plain string) (string, bool) {
-	tokensMu.Lock()
-	defer tokensMu.Unlock()
-	s, err := loadTokens()
-	if err != nil {
+	t, err := findTokenByHash(sha256Hex(plain))
+	if err != nil || t.Revoked || t.Kind == "enroll" {
 		return "", false
 	}
-	h := sha256Hex(plain)
-	for _, t := range s.Tokens {
-		if !t.Revoked && t.Kind != "enroll" && constantTimeEqual(t.Hash, h) {
-			return t.AgentID, true
-		}
+	if !constantTimeEqual(t.Hash, sha256Hex(plain)) {
+		return "", false
 	}
-	return "", false
+	return t.AgentID, true
 }
 
 func revokeAgentToken(id string) error {
-	tokensMu.Lock()
-	defer tokensMu.Unlock()
-	s, err := loadTokens()
+	db, err := getDB()
 	if err != nil {
 		return err
 	}
-	for i := range s.Tokens {
-		if s.Tokens[i].ID == id {
-			s.Tokens[i].Revoked = true
-			return saveTokens(s)
-		}
+	res, err := db.Exec(`UPDATE agent_tokens SET revoked=1 WHERE id=?`, id)
+	if err != nil {
+		return err
 	}
-	return errors.New("not found")
+	if n, _ := res.RowsAffected(); n == 0 {
+		return errors.New("not found")
+	}
+	return nil
 }
 
 func listAgentTokens() []agentToken {
-	tokensMu.Lock()
-	defer tokensMu.Unlock()
-	s, err := loadTokens()
+	db, err := getDB()
 	if err != nil {
 		return nil
 	}
-	out := append([]agentToken{}, s.Tokens...)
-	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt > out[j].CreatedAt })
+	rows, err := db.Query(`SELECT ` + tokenColumns + ` FROM agent_tokens ORDER BY created_at DESC`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	out := []agentToken{}
+	for rows.Next() {
+		t, err := scanToken(rows)
+		if err != nil {
+			return nil
+		}
+		out = append(out, *t)
+	}
 	return out
 }

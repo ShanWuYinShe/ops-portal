@@ -1,22 +1,19 @@
 package main
 
 import (
+	"database/sql"
 	"errors"
-	"os"
-	"sort"
-	"strings"
-	"sync"
 	"time"
 )
 
-// 证书库：portal 本地权威登记表。
+// 证书库：portal 本地权威登记表（SQLite certs 表）。
 // 发证流程：人工在 CF 面板/调 CF API 建证 → portal 登记（cf_id/serial/指纹/CN/有效期）。
 // 生产门禁认"本地库 active + 边缘 verified"双条件；吊销 = 本地 revoke + 去 CF 吊销。
 
 type certRecord struct {
 	ID          string `json:"id"`          // 本地 id
 	Label       string `json:"label"`       // 持有人-设备名，如 liyou-mbpro
-	Kind        string `json:"kind"`        // human / agent
+	Kind        string `json:"kind"`        // human / agent / service / site
 	CFID        string `json:"cf_id"`       // Cloudflare 证书 id
 	Serial      string `json:"serial"`      // CF 返回的 serial_number
 	Fingerprint string `json:"fingerprint"` // fingerprint_sha256
@@ -29,112 +26,112 @@ type certRecord struct {
 	Note        string `json:"note"`
 }
 
-type certStore struct {
-	Certs []certRecord `json:"certs"`
+func scanCert(row *sql.Row) (*certRecord, error) {
+	return scanCertRows(row)
 }
 
-var certsMu sync.Mutex
-
-func certsPath() string {
-	return dataDir() + "/certs.json"
-}
-
-func loadCerts() (*certStore, error) {
-	s := &certStore{}
-	if err := readJSON(certsPath(), s); err != nil {
-		if os.IsNotExist(err) {
-			return &certStore{}, nil
-		}
+func scanCertRows(row interface {
+	Scan(dest ...any) error
+}) (*certRecord, error) {
+	c := &certRecord{}
+	err := row.Scan(&c.ID, &c.Label, &c.Kind, &c.CFID, &c.Serial, &c.Fingerprint,
+		&c.CommonName, &c.Issuer, &c.Status, &c.ExpiresAt, &c.CreatedAt, &c.RevokedAt, &c.Note)
+	if err != nil {
 		return nil, err
 	}
-	if s.Certs == nil {
-		s.Certs = []certRecord{}
-	}
-	return s, nil
+	return c, nil
 }
 
-func saveCerts(s *certStore) error {
-	return atomicWriteJSON(certsPath(), s, 0600)
-}
+const certColumns = `id,label,kind,cf_id,serial,fingerprint,common_name,issuer,status,expires_at,created_at,revoked_at,note`
 
 // findActiveCert 按 serial 或指纹找有效证书（门禁查表用）。
-// hex 串比较用 EqualFold：CF 透传的 serial 是大写，建证 API 返回小写。
+// hex 串大小写不敏感：CF 透传的 serial 是大写，建证 API 返回小写。
 func findActiveCert(serial, fingerprint string) *certRecord {
-	certsMu.Lock()
-	defer certsMu.Unlock()
-	s, err := loadCerts()
+	db, err := getDB()
 	if err != nil {
 		return nil
 	}
-	for i := range s.Certs {
-		c := &s.Certs[i]
-		if c.Status != "active" {
-			continue
-		}
-		if serial != "" && strings.EqualFold(c.Serial, serial) {
-			return c
-		}
-		if fingerprint != "" && strings.EqualFold(c.Fingerprint, fingerprint) {
-			return c
-		}
+	c, err := scanCert(db.QueryRow(`SELECT `+certColumns+` FROM certs WHERE status='active'
+		AND ((? <> '' AND serial = ? COLLATE NOCASE) OR (? <> '' AND fingerprint = ? COLLATE NOCASE))
+		LIMIT 1`, serial, serial, fingerprint, fingerprint))
+	if err != nil {
+		return nil
 	}
-	return nil
+	return c
 }
 
 func listCerts() []certRecord {
-	certsMu.Lock()
-	defer certsMu.Unlock()
-	s, err := loadCerts()
+	db, err := getDB()
 	if err != nil {
 		return []certRecord{}
 	}
-	out := append([]certRecord{}, s.Certs...)
-	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt > out[j].CreatedAt })
+	rows, err := db.Query(`SELECT ` + certColumns + ` FROM certs ORDER BY created_at DESC`)
+	if err != nil {
+		return []certRecord{}
+	}
+	defer rows.Close()
+	out := []certRecord{}
+	for rows.Next() {
+		c, err := scanCertRows(rows)
+		if err != nil {
+			return []certRecord{}
+		}
+		out = append(out, *c)
+	}
 	return out
 }
 
 func addCert(c certRecord) (*certRecord, error) {
-	certsMu.Lock()
-	defer certsMu.Unlock()
-	s, err := loadCerts()
+	db, err := getDB()
 	if err != nil {
 		return nil, err
-	}
-	for _, e := range s.Certs {
-		if e.ID == c.ID {
-			return nil, errors.New("duplicate id")
-		}
 	}
 	c.CreatedAt = time.Now().UTC().Format(time.RFC3339)
 	if c.Status == "" {
 		c.Status = "active"
 	}
-	s.Certs = append(s.Certs, c)
-	if err := saveCerts(s); err != nil {
+	_, err = db.Exec(`INSERT INTO certs (`+certColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		c.ID, c.Label, c.Kind, c.CFID, c.Serial, c.Fingerprint, c.CommonName,
+		c.Issuer, c.Status, c.ExpiresAt, c.CreatedAt, c.RevokedAt, c.Note)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return nil, errors.New("duplicate id")
+		}
 		return nil, err
 	}
 	return &c, nil
 }
 
 func revokeCert(id string) (*certRecord, error) {
-	certsMu.Lock()
-	defer certsMu.Unlock()
-	s, err := loadCerts()
+	db, err := getDB()
 	if err != nil {
 		return nil, err
 	}
-	for i := range s.Certs {
-		if s.Certs[i].ID == id {
-			if s.Certs[i].Status == "revoked" {
-				return &s.Certs[i], nil
-			}
-			s.Certs[i].Status = "revoked"
-			s.Certs[i].RevokedAt = time.Now().UTC().Format(time.RFC3339)
-			if err := saveCerts(s); err != nil {
-				return nil, err
-			}
-			return &s.Certs[i], nil
-		}
+	res, err := db.Exec(`UPDATE certs SET status='revoked', revoked_at=? WHERE id=? AND status <> 'revoked'`,
+		time.Now().UTC().Format(time.RFC3339), id)
+	if err != nil {
+		return nil, err
 	}
-	return nil, errors.New("not found")
+	if n, _ := res.RowsAffected(); n == 0 {
+		// 已吊销则幂等返回，真正不存在才报错（与旧语义一致）
+		c, err := scanCert(db.QueryRow(`SELECT `+certColumns+` FROM certs WHERE id=?`, id))
+		if err != nil {
+			return nil, errors.New("not found")
+		}
+		return c, nil
+	}
+	return scanCert(db.QueryRow(`SELECT `+certColumns+` FROM certs WHERE id=?`, id))
+}
+
+// certIDExists 证书 id 是否存在（任意状态，用户绑定时防 typo）。
+func certIDExists(id string) bool {
+	db, err := getDB()
+	if err != nil {
+		return false
+	}
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM certs WHERE id=?`, id).Scan(&n); err != nil {
+		return false
+	}
+	return n > 0
 }

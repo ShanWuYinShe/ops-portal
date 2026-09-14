@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { api, type AuditEntry } from '$lib/api';
 	import { badgeCls, badgeOf, shortTime } from '$lib/state.svelte';
+	import { askConfirm, toast } from '$lib/dialogs.svelte';
 
 	let entries = $state<AuditEntry[]>([]);
 	let filter = $state('');
@@ -30,6 +31,17 @@
 			);
 		})
 	);
+
+	async function backup() {
+		if (!(await askConfirm('备份数据库', '在线快照 portal.db 到 data/backups/（只留最新 14 份）？', false)))
+			return;
+		try {
+			const r = await api<{ backup: string }>('/api/portal/backup', { method: 'POST' });
+			toast(`已备份：${r.backup}`);
+		} catch (e) {
+			toast('备份失败：' + (e as Error).message, 'err');
+		}
+	}
 </script>
 
 <div class="mb-4.5 flex items-center justify-between">
@@ -37,7 +49,10 @@
 		<h1 class="page-title">审计日志</h1>
 		<div class="page-sub">谁 · 用哪张证书 · 对什么 · 做了什么 · 结果如何（最近 200 条）</div>
 	</div>
-	<input class="input w-55" placeholder="搜索过滤…" bind:value={filter} />
+	<div class="flex items-center gap-2.5">
+		<input class="input w-55" placeholder="搜索过滤…" bind:value={filter} />
+		<button class="btn" onclick={backup}>备份数据库</button>
+	</div>
 </div>
 
 <div class="card">

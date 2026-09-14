@@ -131,25 +131,52 @@ type siteRegistry struct {
 	Sites []siteEntry `json:"sites"`
 }
 
-var sitesMu sync.Mutex
-
-func sitesPath() string { return dataDir() + "/sites.json" }
-
-func loadSites() (*siteRegistry, error) {
-	s := &siteRegistry{}
-	if err := readJSON(sitesPath(), s); err != nil {
-		if os.IsNotExist(err) {
-			return &siteRegistry{}, nil
+func listSiteEntries() []siteEntry {
+	db, err := getDB()
+	if err != nil {
+		return []siteEntry{}
+	}
+	rows, err := db.Query(`SELECT name, ops_url, cert_serial, registered_at FROM sites ORDER BY name`)
+	if err != nil {
+		return []siteEntry{}
+	}
+	defer rows.Close()
+	out := []siteEntry{}
+	for rows.Next() {
+		e := siteEntry{}
+		if err := rows.Scan(&e.Name, &e.OpsURL, &e.CertSerial, &e.RegisteredAt); err != nil {
+			return []siteEntry{}
 		}
-		return nil, err
+		out = append(out, e)
 	}
-	if s.Sites == nil {
-		s.Sites = []siteEntry{}
-	}
-	return s, nil
+	return out
 }
 
-func saveSites(s *siteRegistry) error { return atomicWriteJSON(sitesPath(), s, 0600) }
+func upsertSiteEntry(e siteEntry) error {
+	db, err := getDB()
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`INSERT INTO sites (name, ops_url, cert_serial, registered_at) VALUES (?,?,?,?)
+		ON CONFLICT(name) DO UPDATE SET ops_url=excluded.ops_url, cert_serial=excluded.cert_serial,
+		registered_at=excluded.registered_at`,
+		e.Name, e.OpsURL, e.CertSerial, e.RegisteredAt)
+	return err
+}
+
+// deleteSiteEntry 删除注册；返回是否删掉过。
+func deleteSiteEntry(name string) (bool, error) {
+	db, err := getDB()
+	if err != nil {
+		return false, err
+	}
+	res, err := db.Exec(`DELETE FROM sites WHERE name=?`, name)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
 
 // POST /api/portal/site-certificates/issue（admin）
 // 为被管网站签发注册证书（kind=site），bundle 一次下发：证书+私钥+说明。
@@ -220,28 +247,9 @@ func apiSiteRegister(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "site name mismatch with certificate")
 		return
 	}
-	sitesMu.Lock()
-	s, err := loadSites()
-	if err != nil {
-		sitesMu.Unlock()
-		writeInternalError(w, err)
-		return
-	}
 	entry := siteEntry{Name: name, OpsURL: strings.TrimSpace(body.OpsURL),
 		CertSerial: c.Serial, RegisteredAt: time.Now().UTC().Format(time.RFC3339)}
-	replaced := false
-	for i := range s.Sites {
-		if s.Sites[i].Name == name {
-			s.Sites[i] = entry
-			replaced = true
-		}
-	}
-	if !replaced {
-		s.Sites = append(s.Sites, entry)
-	}
-	err = saveSites(s)
-	sitesMu.Unlock()
-	if err != nil {
+	if err := upsertSiteEntry(entry); err != nil {
 		writeInternalError(w, err)
 		return
 	}
@@ -267,32 +275,13 @@ func apiSitesUnregister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := actorOf(r)
-	sitesMu.Lock()
-	s, err := loadSites()
+	found, err := deleteSiteEntry(name)
 	if err != nil {
-		sitesMu.Unlock()
 		writeInternalError(w, err)
 		return
-	}
-	kept := s.Sites[:0]
-	found := false
-	for _, e := range s.Sites {
-		if e.Name == name {
-			found = true
-			continue
-		}
-		kept = append(kept, e)
 	}
 	if !found {
-		sitesMu.Unlock()
 		writeError(w, http.StatusNotFound, "site not registered")
-		return
-	}
-	s.Sites = kept
-	err = saveSites(s)
-	sitesMu.Unlock()
-	if err != nil {
-		writeInternalError(w, err)
 		return
 	}
 	clearProbe(name)
@@ -304,7 +293,7 @@ func apiSitesUnregister(w http.ResponseWriter, r *http.Request) {
 //
 // 两条接入路径汇入同一视图，不复制数据：
 //   - agent 心跳（内存实时）：compose 项目 → 该网站部署在哪些机器、容器、git 版本；
-//   - 原生注册表（sites.json 持久）：网站的 ops 接口元数据（ops_url 等）。
+//   - 原生注册表（sites 表持久）：网站的 ops 接口元数据（ops_url 等）。
 // agent 掉线时网站仍在（带离线标记），原生注册不受 agent 存亡影响。
 
 type siteAgentRef struct {
@@ -345,12 +334,9 @@ func agentOnlineAt(t time.Time) bool { return time.Since(t) < time.Minute }
 
 // buildSiteViews 按网站名聚合心跳与注册表；名字升序。
 func buildSiteViews() ([]siteView, error) {
-	reg, err := loadSites()
-	if err != nil {
-		return nil, err
-	}
-	native := make(map[string]siteEntry, len(reg.Sites))
-	for _, e := range reg.Sites {
+	entries := listSiteEntries()
+	native := make(map[string]siteEntry, len(entries))
+	for _, e := range entries {
 		native[e.Name] = e
 	}
 
