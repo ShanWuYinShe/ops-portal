@@ -138,7 +138,9 @@ func apiPortalWhoami(w http.ResponseWriter, r *http.Request) {
 	id := certFromRequest(r)
 	u := userFromContext(r)
 	writeOK(w, map[string]any{
-		"verified":    id.Verified,
+		// 边缘透传的 X-Cert-Verify 原值是字符串（"true"/"false"/空），
+		// 对外统一为布尔：非空即边缘已验证。
+		"verified":    strings.TrimSpace(id.Verified) != "",
 		"serial":      id.Serial,
 		"subject":     id.Subject,
 		"fingerprint": id.Fingerprint,
