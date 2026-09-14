@@ -5,9 +5,9 @@
 > 演进只加字段不改语义。
 >
 > 设计原则：**只让网站实现"只有它自己知道"的东西。**
-> 容器状态、镜像、git 版本是宿主机层面的事实，由 agent 边车上报；
+> 容器状态、镜像、git 版本是宿主机层面的事实，由 portal-agent 边车上报；
 > 业务健康（DB 通不通、redis 活不活、迁移跑完没）只有应用进程自己知道，
-> 这才是原生接口存在的理由。任何 agent 已上报的信息，网站不得重复实现。
+> 这才是原生接口存在的理由。任何 portal-agent 已上报的信息，网站不得重复实现。
 
 ## 接口：只有一个
 
@@ -34,7 +34,7 @@
 | `site` | 是 | 注册名（与证书 label / compose 项目名一致） |
 | `status` | 是 | 站点**自己判定**的健康档：`ok` \| `degraded` \| `starting`；除 `ok` 外 portal 一律亮灯 |
 | `time` | 是 | 服务端时间（RFC3339，portal 顺带发现时钟漂移） |
-| `version` / `commit` | 否 | 应用构建版本号/commit（agent 报的是仓库状态，两者不等价） |
+| `version` / `commit` | 否 | 应用构建版本号/commit（portal-agent 报的是仓库状态，两者不等价） |
 | `checks` | 否 | 依赖检查明细；`latency_ms` / `detail` 可选 |
 
 状态语义（portal 的展示与之严格对应）：
@@ -73,7 +73,7 @@ ops 子树是跑在独立子域名上的**基础设施契约**，消费者和目
 
 ## 明确不做的（v1 范围外，勿自行发挥）
 
-- **容器/镜像/git 上报**：agent 的职责。业务进程通常没有 docker.sock，
+- **容器/镜像/git 上报**：portal-agent 的职责。业务进程通常没有 docker.sock，
   也不该有；重复上报只会在统一视图里制造冲突。
 - **请求体**：GET 无 body，参数为零。
 - **业务信封**（如 hotspot 的 `{code,message,data}`）：那是业务 API 的契约，
@@ -91,7 +91,7 @@ ops 子树是跑在独立子域名上的**基础设施契约**，消费者和目
   配置缺失（serial 为空）时必须拒绝一切请求（fail-closed）。
   serial 在 portal「设备证书」页可查（kind=service），轮换时同步更新放行清单。
 - 网站 → portal：网站凭 **site 注册证书** 调 `POST /api/site/register`
-  自助登记 `ops_url`（见 `docs/agent-protocol.md`「统一网站视图」）。
+  自助登记 `ops_url`（见 `docs/portal-agent-protocol.md`「统一网站视图」）。
 
 参考实现：`services/opshttp/`（Go 标准库单文件：鉴权中间件 + 健康端点
 + 超时/panic 兜底，拷走即用，各站点不要重写验签）。
@@ -112,12 +112,12 @@ ops 子树是跑在独立子域名上的**基础设施契约**，消费者和目
   `ok` 绿灯，`degraded`/`starting` 黄灯并列出故障项，`ok:false` 红灯。
 - service 证书未签发时整轮跳过；探测只记日志不记审计（防刷屏）。
 
-## 静态站与 agent 站点
+## 静态站与 portal-agent 站点
 
 - **纯静态站（如 travel）实现零接口**：没有进程、没有依赖，无可报告。
-  其版本信息由 agent 的 git 上报覆盖；CDN/源站可用性不属于 ops 契约
+  其版本信息由 portal-agent 的 git 上报覆盖；CDN/源站可用性不属于 ops 契约
   （那是被动 URL 监控工具的职责，不在本契约内）。
-- **已有 agent 边车的 compose 站点**：容器/git 已覆盖，实现本接口是
+- **已有 portal-agent 边车的 compose 站点**：容器/git 已覆盖，实现本接口是
   **可选**的；只有当你需要"降级可视"（DB 挂了但容器还在跑）时才值得做。
 
 ## 注册前检查清单
@@ -132,5 +132,5 @@ ops 子树是跑在独立子域名上的**基础设施契约**，消费者和目
 
 - 只加字段不改语义；portal 忽略未知字段；站点忽略未知请求头。
 - 破坏性变更升版本号（`/ops/v2/*`），portal 同期双兼容。
-- 历史：v1 曾定义 `/ops/v1/status`（容器/git 快照），因与 agent 职责重复
+- 历史：v1 曾定义 `/ops/v1/status`（容器/git 快照），因与 portal-agent 职责重复
   且站点物理上无法提供（无 docker.sock），已删除；无任何消费者受影响。

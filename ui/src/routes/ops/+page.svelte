@@ -6,7 +6,7 @@
 	let commands = $state<PortalCommand[]>([]);
 	// 一切操作以网站为起点：选网站 → 自动带出机器/compose 项目/服务。
 	let svcSite = $state('');
-	let svcTarget = $state(''); // `${agent_id}|${service}`
+	let svcTarget = $state(''); // `${portal_agent_id}|${service}`
 	let svcAction = $state<'start' | 'stop' | 'restart'>('restart');
 	let deploySite = $state('');
 	let deployAgent = $state('');
@@ -59,7 +59,7 @@
 				method: 'POST',
 				body: JSON.stringify(payload)
 			});
-			toast('已下发，agent 心跳时执行（约 10 秒内）');
+			toast('已下发，portal-agent 心跳时执行（约 10 秒内）');
 			return true;
 		} catch (e) {
 			toast('下发失败：' + (e as Error).message, 'err');
@@ -75,7 +75,7 @@
 		}
 		const verb = { start: '启动', stop: '停止', restart: '重启' }[svcAction];
 		const ok = await enqueue(
-			{ agent_id: agentId, action: svcAction, service, project },
+			{ portal_agent_id: agentId, action: svcAction, service, project },
 			`${verb}服务`,
 			`${agentId} → ${verb} ${project} / ${service}`,
 			svcAction !== 'start'
@@ -94,7 +94,7 @@
 		}
 		const ok = await enqueue(
 			{
-				agent_id: deployAgent,
+				portal_agent_id: deployAgent,
 				action: 'deploy',
 				project: deploySite, // compose 项目名即网站名
 				targets
@@ -107,7 +107,7 @@
 	}
 
 	function labelOf(site: SiteOverview): string {
-		const agent = site.agents.map((a) => a.agent_id).join(', ');
+		const agent = site.agents.map((a) => a.portal_agent_id).join(', ');
 		return `${site.name}${agent ? `（${agent}）` : ''}`;
 	}
 </script>
@@ -141,9 +141,9 @@
 					<label for="f-svcTarget">服务</label>
 					<select id="f-svcTarget" class="input" bind:value={svcTarget} disabled={!svcSiteObj}>
 						<option value="">选择</option>
-						{#each (svcSiteObj?.containers ?? []) as c (c.agent_id + c.id)}
-							<option value="{c.agent_id}|{c.project}|{c.service}">
-								{c.service}{svcSiteObj && svcSiteObj.agents.length > 1 ? ` @ ${c.agent_id}` : ''}
+						{#each (svcSiteObj?.containers ?? []) as c (c.portal_agent_id + c.id)}
+							<option value="{c.portal_agent_id}|{c.project}|{c.service}">
+								{c.service}{svcSiteObj && svcSiteObj.agents.length > 1 ? ` @ ${c.portal_agent_id}` : ''}
 							</option>
 						{/each}
 					</select>
@@ -165,8 +165,8 @@
 					<label for="f-deployAgent">机器</label>
 					<select id="f-deployAgent" class="input" bind:value={deployAgent} disabled={!deploySiteObj}>
 						<option value="">选择</option>
-						{#each (deploySiteObj?.agents ?? []).filter((a) => a.online) as a (a.agent_id)}
-							<option value={a.agent_id}>{a.agent_id}</option>
+						{#each (deploySiteObj?.agents ?? []).filter((a) => a.online) as a (a.portal_agent_id)}
+							<option value={a.portal_agent_id}>{a.portal_agent_id}</option>
 						{/each}
 					</select>
 				</div>
@@ -196,7 +196,7 @@
 				<tr>
 					<td class="font-mono text-ink-2">{shortTime(c.created_at)}</td>
 					<td class="font-mono">{c.id.slice(-6)}</td>
-					<td class="font-mono">{c.agent_id}</td>
+					<td class="font-mono">{c.portal_agent_id}</td>
 					<td>
 						{c.action}
 						{#if c.action === 'deploy'}

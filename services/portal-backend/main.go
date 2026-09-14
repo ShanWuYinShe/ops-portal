@@ -32,7 +32,7 @@ type agentContainer struct {
 }
 
 type agentHeartbeat struct {
-	AgentID         string           `json:"agent_id"`
+	AgentID         string           `json:"portal_agent_id"`
 	Hostname        string           `json:"hostname"`
 	ComposeProjects []string         `json:"compose_projects"`
 	Sites           []agentSite      `json:"sites"`
@@ -60,14 +60,14 @@ func apiAgentHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if hb.AgentID == "" {
-		writeError(w, http.StatusBadRequest, "agent_id required")
+		writeError(w, http.StatusBadRequest, "portal_agent_id required")
 		return
 	}
-	// token 绑定的 agent_id 与上报身份必须一致（防持合法 token 冒充其他 agent
+	// token 绑定的 portal_agent_id 与上报身份必须一致（防持合法 token 冒充其他 agent
 	// 上报状态、偷走下发给他人的命令；legacy 单 token 回退时不绑定）。
 	if bound := agentIDFromContext(r); bound != "" && bound != hb.AgentID {
-		log.Printf("portal: heartbeat agent_id mismatch token=%s body=%s", bound, hb.AgentID)
-		writeError(w, http.StatusForbidden, "agent_id mismatch with token")
+		log.Printf("portal: heartbeat portal_agent_id mismatch token=%s body=%s", bound, hb.AgentID)
+		writeError(w, http.StatusForbidden, "portal_agent_id mismatch with token")
 		return
 	}
 	agentStore.Lock()
@@ -89,7 +89,7 @@ func apiAgentReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		AgentID string          `json:"agent_id"`
+		AgentID string          `json:"portal_agent_id"`
 		Reports []commandReport `json:"reports"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
@@ -97,8 +97,8 @@ func apiAgentReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if bound := agentIDFromContext(r); bound != "" && bound != body.AgentID {
-		log.Printf("portal: report agent_id mismatch token=%s body=%s", bound, body.AgentID)
-		writeError(w, http.StatusForbidden, "agent_id mismatch with token")
+		log.Printf("portal: report portal_agent_id mismatch token=%s body=%s", bound, body.AgentID)
+		writeError(w, http.StatusForbidden, "portal_agent_id mismatch with token")
 		return
 	}
 	for _, rep := range body.Reports {
@@ -124,10 +124,10 @@ func apiPortalAgents(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		out = append(out, map[string]any{
-			"agent_id":  id,
-			"last_seen": st.LastSeen.Format(time.RFC3339),
-			"pending":   pending,
-			"heartbeat": st.Heartbeat,
+			"portal_agent_id": id,
+			"last_seen":       st.LastSeen.Format(time.RFC3339),
+			"pending":         pending,
+			"heartbeat":       st.Heartbeat,
 		})
 	}
 	agentStore.Unlock()
@@ -154,8 +154,8 @@ func apiPortalHealth(w http.ResponseWriter, _ *http.Request) {
 }
 
 // requireAgentTokenV2 机器树双因子：
-//   - 经 nginx（即经 CF 边缘 mTLS）的请求：机器证书须在表且 kind=agent，
-//     且证书 label（=agent_id）与 bearer token 的 agent_id 一致；
+//   - 经 nginx（即经 CF 边缘 mTLS）的请求：机器证书须在表且 kind=portal-agent，
+//     且证书 label（=portal_agent_id）与 bearer token 的 portal_agent_id 一致；
 //   - 同宿主机内网直连（不产生证书头，网络仅 portal_net 可达）：仅 token。
 func requireAgentTokenV2(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -166,7 +166,7 @@ func requireAgentTokenV2(next http.HandlerFunc) http.HandlerFunc {
 		}
 		agentID, ok := validAgentToken(got)
 		if !ok {
-			if want := strings.TrimSpace(getEnv("AGENT_TOKEN", "")); want != "" && constantTimeEqual(got, want) {
+			if want := strings.TrimSpace(getEnv("PORTAL_AGENT_TOKEN", "")); want != "" && constantTimeEqual(got, want) {
 				agentID, ok = "legacy", true
 			}
 		}
@@ -177,13 +177,13 @@ func requireAgentTokenV2(next http.HandlerFunc) http.HandlerFunc {
 		id := certFromRequest(r)
 		if id.Trusted {
 			c := findActiveCert(id.Serial, id.Fingerprint)
-			if c == nil || c.Kind != "agent" || c.Label != agentID {
+			if c == nil || c.Kind != "portal-agent" || c.Label != agentID {
 				log.Printf("portal: agent cert/token mismatch serial=%s", maskMiddle(id.Serial))
 				writeError(w, http.StatusForbidden, "agent certificate mismatch")
 				return
 			}
 		}
-		// token 绑定的 agent_id 塞进 context，心跳/回传强制比对上报身份；
+		// token 绑定的 portal_agent_id 塞进 context，心跳/回传强制比对上报身份；
 		// legacy 单 token 回退（过渡期 dev）传空串表示不绑定。
 		bound := agentID
 		if bound == "legacy" {
@@ -244,9 +244,9 @@ func main() {
 
 	// agent 树（双因子：机器证书 + token；同宿主机内网直连仅 token，见 exec 说明）
 	// enroll 兑换不套 token 中间件：enroll 令牌本身即凭证（一次性，30 分钟）。
-	mux.HandleFunc("POST /api/agent/enroll", apiAgentEnroll)
-	mux.HandleFunc("POST /api/agent/heartbeat", requireAgentTokenV2(apiAgentHeartbeat))
-	mux.HandleFunc("POST /api/agent/report", requireAgentTokenV2(apiAgentReport))
+	mux.HandleFunc("POST /api/portal-agent/enroll", apiAgentEnroll)
+	mux.HandleFunc("POST /api/portal-agent/heartbeat", requireAgentTokenV2(apiAgentHeartbeat))
+	mux.HandleFunc("POST /api/portal-agent/report", requireAgentTokenV2(apiAgentReport))
 
 	// 前端 SPA（SvelteKit adapter-static 产物，Docker 构建时拷到 /app/ui）。
 	// 文件存在则直出，未知路径回退 index.html（客户端路由 /dashboard 等）。

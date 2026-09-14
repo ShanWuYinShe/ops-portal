@@ -16,12 +16,12 @@ import (
 )
 
 // 命令执行：心跳取回命令 → 本地 docker 执行（白名单动作 + 项目白名单）→
-// 经 /api/agent/report 回传结果。容器按 compose service 名定位，
+// 经 /api/portal-agent/report 回传结果。容器按 compose service 名定位，
 // 与 workwork 的 apiServiceAction 模式一致。
 
 type inboundCommand struct {
 	ID      string   `json:"id"`
-	AgentID string   `json:"agent_id"`
+	AgentID string   `json:"portal_agent_id"`
 	Action  string   `json:"action"` // start / stop / restart / deploy
 	Service string   `json:"service"`
 	Project string   `json:"project"` // deploy 用：compose 项目名
@@ -118,7 +118,7 @@ func execCommand(ctx context.Context, cli *client.Client, cmd inboundCommand, pr
 }
 
 func postReport(ctx context.Context, portalURL, token, agentID string, reps []reportItem) error {
-	body, err := json.Marshal(map[string]any{"agent_id": agentID, "reports": reps})
+	body, err := json.Marshal(map[string]any{"portal_agent_id": agentID, "reports": reps})
 	if err != nil {
 		return err
 	}
@@ -135,7 +135,7 @@ func postReport(ctx context.Context, portalURL, token, agentID string, reps []re
 		}
 		if err := postReportOnce(ctx, portalURL, token, body); err != nil {
 			lastErr = err
-			log.Printf("agent: report attempt %d failed: %v", i+1, err)
+			log.Printf("portal-agent: report attempt %d failed: %v", i+1, err)
 			continue
 		}
 		return nil
@@ -147,7 +147,7 @@ func postReportOnce(ctx context.Context, portalURL, token string, body []byte) e
 	opCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(opCtx, http.MethodPost,
-		strings.TrimRight(portalURL, "/")+"/api/agent/report", bytes.NewReader(body))
+		strings.TrimRight(portalURL, "/")+"/api/portal-agent/report", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -168,23 +168,23 @@ func drainCommands(ctx context.Context, cli *client.Client, portalURL, token, ag
 	if len(cmds) == 0 {
 		return
 	}
-	log.Printf("agent: executing %d command(s)", len(cmds))
+	log.Printf("portal-agent: executing %d command(s)", len(cmds))
 	hostname, _ := os.Hostname()
 	for _, c := range cmds {
-		log.Printf("agent: %s %s (%s)", c.Action, c.Service, c.ID)
+		log.Printf("portal-agent: %s %s (%s)", c.Action, c.Service, c.ID)
 		// 目标容器就是 agent 自己时（hostname 即容器短 ID），restart/stop
 		// 会杀掉本进程：先回传"即将执行"，结果由下次心跳的容器状态体现
 		// （Up 时间重置即成功）。deploy 不杀自己，无需预回传。
 		if (c.Action == "restart" || c.Action == "stop") && isSelfTarget(ctx, cli, c.Service, c.Project, projects, hostname) {
 			rep := reportItem{ID: c.ID, Status: "done", Result: c.Action + " self: reported before exec, verify by container uptime"}
 			if err := postReport(ctx, portalURL, token, agentID, []reportItem{rep}); err != nil {
-				log.Printf("agent: report %s failed: %v", c.ID, err)
+				log.Printf("portal-agent: report %s failed: %v", c.ID, err)
 			}
 		}
 		rep := execCommand(ctx, cli, c, projects, deployDirs)
 		// 逐条立即回传：批量回传在自操作场景下永远发不出去。
 		if err := postReport(ctx, portalURL, token, agentID, []reportItem{rep}); err != nil {
-			log.Printf("agent: report %s failed: %v", c.ID, err)
+			log.Printf("portal-agent: report %s failed: %v", c.ID, err)
 		}
 	}
 }

@@ -54,7 +54,7 @@ func TestIssueConsumeEnroll(t *testing.T) {
 	if err != nil {
 		t.Fatalf("db: %v", err)
 	}
-	if _, err := db.Exec(`UPDATE agent_tokens SET expires_at=? WHERE kind='enroll' AND used=0`,
+	if _, err := db.Exec(`UPDATE portal_agent_tokens SET expires_at=? WHERE kind='enroll' AND used=0`,
 		time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)); err != nil {
 		t.Fatalf("age: %v", err)
 	}

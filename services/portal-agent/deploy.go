@@ -86,7 +86,7 @@ func runDeploy(ctx context.Context, deployDirs map[string]string, projects []str
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
-	log.Printf("agent: deploy %v", args)
+	log.Printf("portal-agent: deploy %v", args)
 	err := cmd.Run()
 	out := buf.String()
 	if len(out) > 8192 {

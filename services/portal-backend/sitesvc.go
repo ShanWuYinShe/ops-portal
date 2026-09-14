@@ -297,7 +297,7 @@ func apiSitesUnregister(w http.ResponseWriter, r *http.Request) {
 // agent 掉线时网站仍在（带离线标记），原生注册不受 agent 存亡影响。
 
 type siteAgentRef struct {
-	AgentID string `json:"agent_id"`
+	AgentID string `json:"portal_agent_id"`
 	Online  bool   `json:"online"`
 }
 
@@ -305,12 +305,12 @@ type siteAgentRef struct {
 // 网站部署在多台机器时每条记录各自携带目标 agent。
 type siteContainer struct {
 	agentContainer
-	AgentID string `json:"agent_id"`
+	AgentID string `json:"portal_agent_id"`
 }
 
 type siteGitView struct {
 	agentSite
-	AgentID string `json:"agent_id"`
+	AgentID string `json:"portal_agent_id"`
 }
 
 type siteView struct {
@@ -364,7 +364,7 @@ func buildSiteViews() ([]siteView, error) {
 				seen[v.Name] = true
 			}
 			if v.Source == "" {
-				v.Source = "agent"
+				v.Source = "portal-agent"
 			}
 		}
 		for _, p := range hb.ComposeProjects {
@@ -389,7 +389,7 @@ func buildSiteViews() ([]siteView, error) {
 	for name, e := range native {
 		v := viewOf(name)
 		v.OpsURL, v.CertSerial, v.RegisteredAt = e.OpsURL, e.CertSerial, e.RegisteredAt
-		if v.Source == "agent" {
+		if v.Source == "portal-agent" {
 			v.Source = "both"
 		} else {
 			v.Source = "native"

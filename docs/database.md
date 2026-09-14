@@ -2,8 +2,8 @@
 
 portal 的全部运营数据存在单个 SQLite 文件 `portal.db`
 （`DATA_DIR`，容器内 `/app/data/portal.db`），WAL 模式。
-表：`certs` / `agent_tokens` / `users` / `sites` / `commands` / `audit`。
-agent 心跳等实时状态仍在内存（backend 重启后靠下次心跳自愈）。
+表：`certs` / `portal_agent_tokens` / `users` / `sites` / `commands` / `audit`。
+portal-agent 心跳等实时状态仍在内存（backend 重启后靠下次心跳自愈）。
 
 ## 从 JSON 迁移
 
@@ -13,6 +13,18 @@ agent 心跳等实时状态仍在内存（backend 重启后靠下次心跳自愈
 `.migrated` 备查，失败只记日志不挡启动。回滚到旧版时 `.migrated`
 改回原名即可（旧版读 JSON，新版写 DB，两边不互写）。
 
+## portal-agent 改名迁移（未发版破坏性变更）
+
+agent 更名 portal-agent 时同步改名了表/列与 kind 值，启动时幂等执行
+（`db.go migrateRenames`，仅旧名存在时动作，全新库空转）：
+
+- 表 `agent_tokens` → `portal_agent_tokens`；
+- 列 `commands.agent_id` → `portal_agent_id`；
+- `certs.kind` / `portal_agent_tokens.kind` 存量值 `agent` → `portal-agent`。
+
+令牌明文前缀 `opsa_` → `opa_`：hash 对明文计算，旧令牌不迁移，
+改名版本部署后为 portal-agent 重新签发令牌（旧令牌作废）。
+
 ## 备份与恢复
 
 - 在线备份：`POST /api/portal/backup`（admin，审计页有点按钮），
@@ -21,7 +33,7 @@ agent 心跳等实时状态仍在内存（backend 重启后靠下次心跳自愈
 - 异地：把 `backups/` 目录再同步一份出去（rsync/s3 任选）。
 - 恢复：停 backend → 用备份文件覆盖 `portal.db`（删同目录
   `portal.db-wal` / `-shm`）→ 起 backend。
-- `service-client.key` / `.pem` 与 `agent` 证书包是文件，
+- `service-client.key` / `.pem` 与 `portal-agent` 证书包是文件，
   不在库里，随 `data/` 目录一起备份。
 
 ## 保留期

@@ -23,7 +23,7 @@
 		{ href: '/ops', label: '命令与发布', icon: TerminalSquare },
 		{ group: '安全与审计', adminOnly: true },
 		{ href: '/certs', label: '设备证书', icon: ShieldCheck, adminOnly: true },
-		{ href: '/tokens', label: 'Agent 令牌', icon: KeyRound, adminOnly: true },
+		{ href: '/tokens', label: 'Portal-Agent 令牌', icon: KeyRound, adminOnly: true },
 		{ href: '/audit', label: '审计日志', icon: History, adminOnly: true }
 	];
 

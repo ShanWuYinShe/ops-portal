@@ -8,12 +8,12 @@ import (
 	"time"
 )
 
-// agent token 库（SQLite agent_tokens 表）：provision 时签发，一次显示，可轮换可吊销。
+// agent token 库（SQLite portal_agent_tokens 表）：provision 时签发，一次显示，可轮换可吊销。
 // token 只存 SHA256 摘要（防库泄露直接可用），签发时返回明文一次。
 
 type agentToken struct {
 	ID        string `json:"id"`
-	AgentID   string `json:"agent_id"`
+	AgentID   string `json:"portal_agent_id"`
 	Hash      string `json:"hash"`
 	CreatedBy string `json:"created_by"`
 	CreatedAt string `json:"created_at"`
@@ -35,12 +35,12 @@ func scanToken(row interface {
 	}
 	t.Revoked, t.Used = revoked != 0, used != 0
 	if t.Kind == "" {
-		t.Kind = "agent" // 旧库存量正式 token 无 kind 字段
+		t.Kind = "portal-agent" // 旧库存量正式 token 无 kind 字段
 	}
 	return t, nil
 }
 
-const tokenColumns = `id,agent_id,hash,created_by,created_at,revoked,kind,expires_at,used`
+const tokenColumns = `id,portal_agent_id,hash,created_by,created_at,revoked,kind,expires_at,used`
 
 func randHex(n int) string {
 	b := make([]byte, n)
@@ -55,7 +55,7 @@ func insertToken(t agentToken) error {
 	if err != nil {
 		return err
 	}
-	_, err = db.Exec(`INSERT INTO agent_tokens (`+tokenColumns+`) VALUES (?,?,?,?,?,?,?,?,?)`,
+	_, err = db.Exec(`INSERT INTO portal_agent_tokens (`+tokenColumns+`) VALUES (?,?,?,?,?,?,?,?,?)`,
 		t.ID, t.AgentID, t.Hash, t.CreatedBy, t.CreatedAt,
 		boolInt(t.Revoked), t.Kind, t.ExpiresAt, boolInt(t.Used))
 	return err
@@ -64,12 +64,12 @@ func insertToken(t agentToken) error {
 // issueAgentToken 签发 token，返回明文（只此一次）与记录。
 func issueAgentToken(agentID, createdBy string) (string, *agentToken, error) {
 	if agentID == "" {
-		return "", nil, errors.New("agent_id required")
+		return "", nil, errors.New("portal_agent_id required")
 	}
-	plain := "opsa_" + randHex(24)
+	plain := "opa_" + randHex(24)
 	t := agentToken{
 		ID: "tok-" + randHex(6), AgentID: agentID, Hash: sha256Hex(plain),
-		CreatedBy: createdBy, CreatedAt: time.Now().UTC().Format(time.RFC3339), Kind: "agent",
+		CreatedBy: createdBy, CreatedAt: time.Now().UTC().Format(time.RFC3339), Kind: "portal-agent",
 	}
 	if err := insertToken(t); err != nil {
 		return "", nil, err
@@ -77,12 +77,12 @@ func issueAgentToken(agentID, createdBy string) (string, *agentToken, error) {
 	return plain, &t, nil
 }
 
-// issueEnrollToken 签发一次性注册令牌（enroll_ 前缀，绑定 agent_id、
-// 30 分钟有效、单次使用）。被管机凭它调 POST /api/agent/enroll 换正式
+// issueEnrollToken 签发一次性注册令牌（enroll_ 前缀，绑定 portal_agent_id、
+// 30 分钟有效、单次使用）。被管机凭它调 POST /api/portal-agent/enroll 换正式
 // token，免人工复制长效 token。库里只存摘要，与正式 token 一致。
 func issueEnrollToken(agentID, createdBy string) (string, *agentToken, error) {
 	if agentID == "" {
-		return "", nil, errors.New("agent_id required")
+		return "", nil, errors.New("portal_agent_id required")
 	}
 	plain := "enroll_" + randHex(24)
 	t := agentToken{
@@ -102,14 +102,14 @@ func findTokenByHash(h string) (*agentToken, error) {
 	if err != nil {
 		return nil, err
 	}
-	t, err := scanToken(db.QueryRow(`SELECT `+tokenColumns+` FROM agent_tokens WHERE hash=? LIMIT 1`, h))
+	t, err := scanToken(db.QueryRow(`SELECT `+tokenColumns+` FROM portal_agent_tokens WHERE hash=? LIMIT 1`, h))
 	if err == sql.ErrNoRows {
 		return nil, errors.New("invalid token")
 	}
 	return t, err
 }
 
-// consumeEnrollToken 校验并核销一次性注册令牌，返回绑定的 agent_id。
+// consumeEnrollToken 校验并核销一次性注册令牌，返回绑定的 portal_agent_id。
 // 过期/已用/已吊销/串号一律失败（调用方对客户端统一报 invalid，不区分原因）。
 // 核销用条件 UPDATE 保证并发下单次语义。
 func consumeEnrollToken(plain, agentID string) (string, error) {
@@ -134,9 +134,9 @@ func consumeEnrollToken(plain, agentID string) (string, error) {
 		}
 	}
 	if t.AgentID != agentID {
-		return "", errors.New("agent_id mismatch")
+		return "", errors.New("portal_agent_id mismatch")
 	}
-	res, err := db.Exec(`UPDATE agent_tokens SET used=1 WHERE id=? AND used=0`, t.ID)
+	res, err := db.Exec(`UPDATE portal_agent_tokens SET used=1 WHERE id=? AND used=0`, t.ID)
 	if err != nil {
 		return "", err
 	}
@@ -163,7 +163,7 @@ func revokeAgentToken(id string) error {
 	if err != nil {
 		return err
 	}
-	res, err := db.Exec(`UPDATE agent_tokens SET revoked=1 WHERE id=?`, id)
+	res, err := db.Exec(`UPDATE portal_agent_tokens SET revoked=1 WHERE id=?`, id)
 	if err != nil {
 		return err
 	}
@@ -178,7 +178,7 @@ func listAgentTokens() []agentToken {
 	if err != nil {
 		return nil
 	}
-	rows, err := db.Query(`SELECT ` + tokenColumns + ` FROM agent_tokens ORDER BY created_at DESC`)
+	rows, err := db.Query(`SELECT ` + tokenColumns + ` FROM portal_agent_tokens ORDER BY created_at DESC`)
 	if err != nil {
 		return nil
 	}

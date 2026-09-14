@@ -20,13 +20,13 @@ func contextWithUser(r *http.Request, u portalUser) context.Context {
 
 const agentCtxKey ctxKey = "agentID"
 
-// contextWithAgentID 把 token 绑定的 agent_id 塞进 context
+// contextWithAgentID 把 token 绑定的 portal_agent_id 塞进 context
 // （requireAgentTokenV2 已校验；legacy 单 token 回退时传空串表示不绑定）。
 func contextWithAgentID(r *http.Request, agentID string) context.Context {
 	return context.WithValue(r.Context(), agentCtxKey, agentID)
 }
 
-// agentIDFromContext 取 token 绑定的 agent_id；空串表示未绑定（legacy 回退）。
+// agentIDFromContext 取 token 绑定的 portal_agent_id；空串表示未绑定（legacy 回退）。
 func agentIDFromContext(r *http.Request) string {
 	if v, ok := r.Context().Value(agentCtxKey).(string); ok {
 		return v

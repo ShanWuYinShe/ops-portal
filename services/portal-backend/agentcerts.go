@@ -17,9 +17,9 @@ import (
 	"time"
 )
 
-// 机器证书：agent 与人一样持 CF 托管 CA 客户端证书（kind=agent），
-// 边缘 WAF 不再豁免 /api/agent/*，机器请求同样过边缘 mTLS；
-// origin 侧校验「证书在表且 kind=agent + bearer token 同 agent_id」双因子。
+// 机器证书：agent 与人一样持 CF 托管 CA 客户端证书（kind=portal-agent），
+// 边缘 WAF 不再豁免 /api/portal-agent/*，机器请求同样过边缘 mTLS；
+// origin 侧校验「证书在表且 kind=portal-agent + bearer token 同 portal_agent_id」双因子。
 
 // POST /api/portal/agent-certificates/issue（admin）
 // 生成密钥对+CSR → 调 CF API 签发 → 入证书表 → 一次性返回机器证书包。
@@ -28,14 +28,14 @@ func apiAgentCertificateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		AgentID string `json:"agent_id"`
+		AgentID string `json:"portal_agent_id"`
 	}
 	if !decodeBody(w, r, &body) {
 		return
 	}
 	agentID := strings.TrimSpace(body.AgentID)
 	if agentID == "" {
-		writeError(w, http.StatusBadRequest, "agent_id required")
+		writeError(w, http.StatusBadRequest, "portal_agent_id required")
 		return
 	}
 	u := actorOf(r)
@@ -51,10 +51,10 @@ func apiAgentCertificateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := addCert(certRecord{
-		ID: "cert-agent-" + randHex(6), Label: agentID, Kind: "agent",
+		ID: "cert-portal-agent-" + randHex(6), Label: agentID, Kind: "portal-agent",
 		CFID: cfID, Serial: serial, Fingerprint: fp, CommonName: agentID,
 		Issuer: "cloudflare-managed", Status: "active",
-		ExpiresAt: expires, Note: "机器证书（agent）",
+		ExpiresAt: expires, Note: "机器证书（portal-agent）",
 	}); err != nil {
 		writeInternalError(w, err)
 		return
@@ -64,12 +64,12 @@ func apiAgentCertificateIssue(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, err)
 		return
 	}
-	audit(u.Username, serial, "agent_cert.issue", agentID, "ok", tok.ID, r.RemoteAddr)
+	audit(u.Username, serial, "portal_agent_cert.issue", agentID, "ok", tok.ID, r.RemoteAddr)
 	writeOK(w, map[string]any{
-		"agent_id": agentID, "client_cert": string(certPEM),
-		"client_key": string(key), "agent_token": tokenPlain,
+		"portal_agent_id": agentID, "client_cert": string(certPEM),
+		"client_key": string(key), "portal_agent_token": tokenPlain,
 		"serial": serial, "fingerprint": fp, "expires_at": expires,
-		"note": "证书包仅此一次返回；agent 侧以客户端证书出网 + bearer token 双因子",
+		"note": "证书包仅此一次返回；portal-agent 侧以客户端证书出网 + bearer token 双因子",
 	})
 }
 
@@ -79,7 +79,7 @@ func genCSR(cn string) (keyPEM, csrPEM []byte, err error) {
 		return nil, nil, err
 	}
 	tpl := x509.CertificateRequest{
-		Subject:            pkix.Name{CommonName: cn, Organization: []string{"ops-agent"}},
+		Subject:            pkix.Name{CommonName: cn, Organization: []string{"portal-agent"}},
 		SignatureAlgorithm: x509.SHA256WithRSA,
 	}
 	csrDer, err := x509.CreateCertificateRequest(rand.Reader, &tpl, key)

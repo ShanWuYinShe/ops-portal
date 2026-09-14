@@ -15,46 +15,46 @@ func TestResolveTokenEnroll(t *testing.T) {
 	var calls int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
-		if r.URL.Path != "/api/agent/enroll" {
+		if r.URL.Path != "/api/portal-agent/enroll" {
 			http.NotFound(w, r)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"ok":true,"token":"opsa_test123"}`))
+		_, _ = w.Write([]byte(`{"ok":true,"token":"opa_test123"}`))
 	}))
 	defer srv.Close()
 
 	dir := t.TempDir()
-	t.Setenv("AGENT_TOKEN", "")
-	t.Setenv("AGENT_ENROLL_TOKEN", "enroll_test123")
-	t.Setenv("AGENT_TOKEN_FILE", filepath.Join(dir, "agent-token"))
+	t.Setenv("PORTAL_AGENT_TOKEN", "")
+	t.Setenv("PORTAL_AGENT_ENROLL_TOKEN", "enroll_test123")
+	t.Setenv("PORTAL_AGENT_TOKEN_FILE", filepath.Join(dir, "agent-token"))
 
 	tok, err := resolveToken(context.Background(), srv.URL, "agent-test-01")
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if tok != "opsa_test123" || calls != 1 {
+	if tok != "opa_test123" || calls != 1 {
 		t.Fatalf("tok=%q calls=%d", tok, calls)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "agent-token"))
 	if err != nil {
 		t.Fatalf("token file: %v", err)
 	}
-	if string(data) != "opsa_test123\n" {
+	if string(data) != "opa_test123\n" {
 		t.Fatalf("file = %q", data)
 	}
 
 	// 重启：读盘，不再调兑换接口
-	t.Setenv("AGENT_ENROLL_TOKEN", "enroll_used_up")
+	t.Setenv("PORTAL_AGENT_ENROLL_TOKEN", "enroll_used_up")
 	tok2, err := resolveToken(context.Background(), srv.URL, "agent-test-01")
-	if err != nil || tok2 != "opsa_test123" || calls != 1 {
+	if err != nil || tok2 != "opa_test123" || calls != 1 {
 		t.Fatalf("cached tok=%q err=%v calls=%d", tok2, err, calls)
 	}
 
 	// AGENT_TOKEN 优先于一切
-	t.Setenv("AGENT_TOKEN", "opsa_direct")
+	t.Setenv("PORTAL_AGENT_TOKEN", "opa_direct")
 	tok3, err := resolveToken(context.Background(), srv.URL, "agent-test-01")
-	if err != nil || tok3 != "opsa_direct" {
+	if err != nil || tok3 != "opa_direct" {
 		t.Fatalf("direct tok=%q err=%v", tok3, err)
 	}
 
@@ -64,8 +64,8 @@ func TestResolveTokenEnroll(t *testing.T) {
 		_, _ = w.Write([]byte(`{"ok":false,"error":"invalid enroll token"}`))
 	}))
 	defer bad.Close()
-	t.Setenv("AGENT_TOKEN", "")
-	t.Setenv("AGENT_TOKEN_FILE", filepath.Join(dir, "missing"))
+	t.Setenv("PORTAL_AGENT_TOKEN", "")
+	t.Setenv("PORTAL_AGENT_TOKEN_FILE", filepath.Join(dir, "missing"))
 	if _, err := resolveToken(context.Background(), bad.URL, "agent-test-01"); err == nil {
 		t.Fatal("bad enroll should fail")
 	}

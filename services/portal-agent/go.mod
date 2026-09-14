@@ -1,4 +1,4 @@
-module agent
+module portal-agent
 
 go 1.25.0
 

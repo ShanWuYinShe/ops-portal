@@ -13,7 +13,7 @@ import (
 func TestAgentBindingEnforced(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("DATA_DIR", dir)
-	t.Setenv("AGENT_TOKEN", "")
+	t.Setenv("PORTAL_AGENT_TOKEN", "")
 
 	plainA, _, err := issueAgentToken("agent-a-01", "tester")
 	if err != nil {
@@ -31,15 +31,15 @@ func TestAgentBindingEnforced(t *testing.T) {
 	hb := requireAgentTokenV2(apiAgentHeartbeat)
 	rep := requireAgentTokenV2(apiAgentReport)
 
-	mismatch := `{"agent_id":"agent-b-01","hostname":"h","compose_projects":[],"sites":[],"containers":[]}`
+	mismatch := `{"portal_agent_id":"agent-b-01","hostname":"h","compose_projects":[],"sites":[],"containers":[]}`
 	if code := post(plainA, mismatch, hb); code != http.StatusForbidden {
 		t.Fatalf("heartbeat mismatch = %d, want 403", code)
 	}
-	if code := post(plainA, `{"agent_id":"agent-b-01","reports":[]}`, rep); code != http.StatusForbidden {
+	if code := post(plainA, `{"portal_agent_id":"agent-b-01","reports":[]}`, rep); code != http.StatusForbidden {
 		t.Fatalf("report mismatch = %d, want 403", code)
 	}
 
-	match := `{"agent_id":"agent-a-01","hostname":"h","compose_projects":[],"sites":[],"containers":[]}`
+	match := `{"portal_agent_id":"agent-a-01","hostname":"h","compose_projects":[],"sites":[],"containers":[]}`
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(match))
 	req.RemoteAddr = "192.0.2.9:1234"
@@ -55,8 +55,8 @@ func TestAgentBindingEnforced(t *testing.T) {
 		t.Fatalf("heartbeat body = %s", rec.Body.String())
 	}
 
-	// legacy 回退：AGENT_TOKEN 生效时不绑定，上报任意 agent_id 放行
-	t.Setenv("AGENT_TOKEN", "dev-legacy-secret")
+	// legacy 回退：PORTAL_AGENT_TOKEN 生效时不绑定，上报任意 portal_agent_id 放行
+	t.Setenv("PORTAL_AGENT_TOKEN", "dev-legacy-secret")
 	if code := post("dev-legacy-secret", mismatch, hb); code != http.StatusOK {
 		t.Fatalf("legacy heartbeat = %d, want 200", code)
 	}

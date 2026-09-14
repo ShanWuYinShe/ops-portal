@@ -2,7 +2,7 @@ name: ops-portal
 
 # ops-portal：独立统一管理站
 # 与 hotspot / workwork 平级，互不嵌套。portal 本身不挂 docker.sock，
-# 容器操作一律经各机 ops-agent 回连执行。
+# 容器操作一律经各机 portal-agent 回连执行。
 #
 # 本地启动：cp .env.example .env && ./pki/dev-selfsign.sh && docker compose up -d --build
 # 入口：https://localhost:8443（dev 自签证书，浏览器会告警，属预期）
@@ -40,7 +40,7 @@ services:
       - CERT_SUBJECT_HEADER=${CERT_SUBJECT_HEADER:-}
       - CERT_FINGERPRINT_HEADER=${CERT_FINGERPRINT_HEADER:-}
       - DEV_ALLOW_NO_CERT=${DEV_ALLOW_NO_CERT:-}
-      - AGENT_TOKEN=${AGENT_TOKEN:-}
+      - PORTAL_AGENT_TOKEN=${PORTAL_AGENT_TOKEN:-}
       # 机器证书包签发：调 CF 托管 CA API（token 仅服务器 IP 白名单可用）
       - CF_API_TOKEN=${CF_API_TOKEN:-}
       - CF_ZONE_ID=${CF_ZONE_ID:-}
@@ -100,7 +100,7 @@ services:
   agent-local:
     profiles: ["dev"]
     build:
-      context: ./services/agent
+      context: ./services/portal-agent
       dockerfile: Dockerfile
       args:
         GO_VERSION: ${GO_VERSION:-1.26.5}
@@ -122,17 +122,17 @@ services:
       - portal_net
     environment:
       - TZ=Asia/Shanghai
-      - AGENT_ID=${AGENT_ID:-local-dev}
-      - AGENT_TOKEN=${AGENT_TOKEN:-change-me-dev-only}
+      - PORTAL_AGENT_ID=${PORTAL_AGENT_ID:-local-dev}
+      - PORTAL_AGENT_TOKEN=${PORTAL_AGENT_TOKEN:-change-me-dev-only}
       - PORTAL_URL=${PORTAL_URL:-http://portal-backend:8319}
-      - AGENT_COMPOSE_PROJECTS=${AGENT_COMPOSE_PROJECTS:-ops-portal}
-      - AGENT_SITES=${AGENT_SITES:-}
-      - AGENT_DEPLOY_DIRS=${AGENT_DEPLOY_DIRS:-}
+      - PORTAL_AGENT_COMPOSE_PROJECTS=${PORTAL_AGENT_COMPOSE_PROJECTS:-ops-portal}
+      - PORTAL_AGENT_SITES=${PORTAL_AGENT_SITES:-}
+      - PORTAL_AGENT_DEPLOY_DIRS=${PORTAL_AGENT_DEPLOY_DIRS:-}
       - HEARTBEAT_INTERVAL=5s
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       # deploy 需要的站点目录由各机部署文件另行挂载（见 .env.example
-      # AGENT_DEPLOY_DIRS）；主文件不硬编码宿主机路径。
+      # PORTAL_AGENT_DEPLOY_DIRS）；主文件不硬编码宿主机路径。
     depends_on:
       portal-backend:
         condition: service_healthy

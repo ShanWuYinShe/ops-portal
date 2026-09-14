@@ -27,3 +27,5 @@ logs/
 ui/.svelte-kit/
 ui/build/
 ui/node_modules/
+services/portal-agent/agent
+services/portal-agent/portal-agent

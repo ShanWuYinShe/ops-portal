@@ -44,18 +44,18 @@ CREATE INDEX IF NOT EXISTS idx_certs_fingerprint_nocase ON certs(fingerprint COL
 -- 清理旧版的 BINARY 索引（服务不了 NOCASE 比较，留着只增写入成本）
 DROP INDEX IF EXISTS idx_certs_serial;
 DROP INDEX IF EXISTS idx_certs_fingerprint;
-CREATE TABLE IF NOT EXISTS agent_tokens (
+CREATE TABLE IF NOT EXISTS portal_agent_tokens (
   id TEXT PRIMARY KEY,
-  agent_id TEXT NOT NULL DEFAULT '',
+  portal_agent_id TEXT NOT NULL DEFAULT '',
   hash TEXT NOT NULL DEFAULT '',
   created_by TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT '',
   revoked INTEGER NOT NULL DEFAULT 0,
-  kind TEXT NOT NULL DEFAULT 'agent',
+  kind TEXT NOT NULL DEFAULT 'portal-agent',
   expires_at TEXT NOT NULL DEFAULT '',
   used INTEGER NOT NULL DEFAULT 0
 );
-CREATE INDEX IF NOT EXISTS idx_tokens_hash ON agent_tokens(hash);
+CREATE INDEX IF NOT EXISTS idx_tokens_hash ON portal_agent_tokens(hash);
 CREATE TABLE IF NOT EXISTS users (
   username TEXT PRIMARY KEY,
   role TEXT NOT NULL DEFAULT 'ops.viewer',
@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS sites (
 );
 CREATE TABLE IF NOT EXISTS commands (
   id TEXT PRIMARY KEY,
-  agent_id TEXT NOT NULL DEFAULT '',
+  portal_agent_id TEXT NOT NULL DEFAULT '',
   action TEXT NOT NULL DEFAULT '',
   service TEXT NOT NULL DEFAULT '',
   project TEXT NOT NULL DEFAULT '',
@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS commands (
   created_at TEXT NOT NULL DEFAULT '',
   result TEXT NOT NULL DEFAULT ''
 );
-CREATE INDEX IF NOT EXISTS idx_commands_agent ON commands(agent_id, status);
+CREATE INDEX IF NOT EXISTS idx_commands_agent ON commands(portal_agent_id, status);
 CREATE TABLE IF NOT EXISTS audit (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   at TEXT NOT NULL DEFAULT '',
@@ -133,9 +133,20 @@ func getDB() (*sql.DB, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	migrateRenames(db)
 	if _, err := db.Exec(schema); err != nil {
 		_ = db.Close()
 		return nil, err
+	}
+	// kind 值归一（幂等）：改名前入库的机器证书/令牌 kind 仍是 'agent'。
+	for _, stmt := range []string{
+		`UPDATE portal_agent_tokens SET kind='portal-agent' WHERE kind='agent'`,
+		`UPDATE certs SET kind='portal-agent' WHERE kind='agent'`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
 	}
 	if err := db.Ping(); err != nil {
 		_ = db.Close()
@@ -154,6 +165,50 @@ func tableEmpty(db *sql.DB, table string) bool {
 	return n == 0
 }
 
+// migrateRenames 未发版期破坏性改名的 schema 演进（幂等）：agent_tokens 表
+// 改名 portal_agent_tokens（含其 agent_id 列）、commands.agent_id 列改名
+// portal_agent_id。仅当旧名存在时动作；全新库直接由 schema 建新名结构，
+// 此处全部空转。
+func migrateRenames(db *sql.DB) {
+	var n int
+	err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='agent_tokens'`).Scan(&n)
+	if err == nil && n > 0 {
+		if _, err := db.Exec(`ALTER TABLE agent_tokens RENAME TO portal_agent_tokens`); err != nil {
+			log.Printf("db: rename table agent_tokens failed: %v", err)
+		} else {
+			log.Printf("db: renamed table agent_tokens -> portal_agent_tokens")
+		}
+	}
+	renameColumnIfLegacy(db, "portal_agent_tokens", "agent_id", "portal_agent_id")
+	renameColumnIfLegacy(db, "commands", "agent_id", "portal_agent_id")
+}
+
+// renameColumnIfLegacy 表存在且含旧列名时改名（PRAGMA 探测，幂等）。
+func renameColumnIfLegacy(db *sql.DB, table, legacy, modern string) {
+	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return // 表不存在（全新库）：schema 会按新名建
+	}
+	defer rows.Close()
+	hasLegacy := false
+	for rows.Next() {
+		var cid, notnull, pk int
+		var name, ctype string
+		var dflt any
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err == nil && name == legacy {
+			hasLegacy = true
+		}
+	}
+	if !hasLegacy {
+		return
+	}
+	if _, err := db.Exec(`ALTER TABLE ` + table + ` RENAME COLUMN ` + legacy + ` TO ` + modern); err != nil {
+		log.Printf("db: rename %s.%s failed: %v", table, legacy, err)
+	} else {
+		log.Printf("db: renamed column %s.%s -> %s", table, legacy, modern)
+	}
+}
+
 func boolInt(b bool) int {
 	if b {
 		return 1
@@ -162,20 +217,46 @@ func boolInt(b bool) int {
 }
 
 // 以下为旧版 JSON 文件结构，仅迁移时解析用（db.go migrateLegacyJSON）。
+// 字段名沿用历史命名（agent_id），与现行协议字段 portal_agent_id 无关。
 type certStore struct {
 	Certs []certRecord `json:"certs"`
 }
 
+type legacyAgentToken struct {
+	ID        string `json:"id"`
+	AgentID   string `json:"agent_id"`
+	Hash      string `json:"hash"`
+	CreatedBy string `json:"created_by"`
+	CreatedAt string `json:"created_at"`
+	Revoked   bool   `json:"revoked"`
+	Kind      string `json:"kind,omitempty"`
+	ExpiresAt string `json:"expires_at,omitempty"`
+	Used      bool   `json:"used,omitempty"`
+}
+
 type tokenStore struct {
-	Tokens []agentToken `json:"tokens"`
+	Tokens []legacyAgentToken `json:"tokens"`
 }
 
 type userStore struct {
 	Users []portalUser `json:"users"`
 }
 
+type legacyCommand struct {
+	ID        string   `json:"id"`
+	AgentID   string   `json:"agent_id"`
+	Action    string   `json:"action"`
+	Service   string   `json:"service"`
+	Project   string   `json:"project"`
+	Targets   []string `json:"targets"`
+	Status    string   `json:"status"`
+	CreatedBy string   `json:"created_by"`
+	CreatedAt string   `json:"created_at"`
+	Result    string   `json:"result"`
+}
+
 type commandStore struct {
-	Commands []portalCommand `json:"commands"`
+	Commands []legacyCommand `json:"commands"`
 }
 
 // isUniqueViolation 主键/唯一冲突（addCert 的 duplicate id 等）。
@@ -227,6 +308,9 @@ func migrateLegacyJSON(db *sql.DB, dir string) {
 			if c.Status == "" {
 				c.Status = "active"
 			}
+			if c.Kind == "agent" {
+				c.Kind = "portal-agent" // 旧版机器证书 kind 归一
+			}
 			if _, err := tx.Exec(`INSERT OR IGNORE INTO certs
 				(id,label,kind,cf_id,serial,fingerprint,common_name,issuer,status,expires_at,created_at,revoked_at,note)
 				VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
@@ -238,7 +322,7 @@ func migrateLegacyJSON(db *sql.DB, dir string) {
 		return len(s.Certs), tx.Commit()
 	})
 
-	migrate("agent_tokens", "agent_tokens.json", func() (int, error) {
+	migrate("portal_agent_tokens", "agent_tokens.json", func() (int, error) {
 		s := &tokenStore{}
 		if err := readJSON(dir+"/agent_tokens.json", s); err != nil {
 			return 0, err
@@ -250,10 +334,10 @@ func migrateLegacyJSON(db *sql.DB, dir string) {
 		defer tx.Rollback()
 		for _, t := range s.Tokens {
 			if t.Kind == "" {
-				t.Kind = "agent" // 旧库存量正式 token 无 kind 字段
+				t.Kind = "portal-agent" // 旧库存量正式 token 无 kind 字段
 			}
-			if _, err := tx.Exec(`INSERT OR IGNORE INTO agent_tokens
-				(id,agent_id,hash,created_by,created_at,revoked,kind,expires_at,used)
+			if _, err := tx.Exec(`INSERT OR IGNORE INTO portal_agent_tokens
+				(id,portal_agent_id,hash,created_by,created_at,revoked,kind,expires_at,used)
 				VALUES (?,?,?,?,?,?,?,?,?)`,
 				t.ID, t.AgentID, t.Hash, t.CreatedBy, t.CreatedAt,
 				boolInt(t.Revoked), t.Kind, t.ExpiresAt, boolInt(t.Used)); err != nil {
@@ -314,7 +398,7 @@ func migrateLegacyJSON(db *sql.DB, dir string) {
 		for _, c := range s.Commands {
 			tg, _ := marshalTargets(c.Targets)
 			if _, err := tx.Exec(`INSERT OR IGNORE INTO commands
-				(id,agent_id,action,service,project,targets,status,created_by,created_at,result)
+				(id,portal_agent_id,action,service,project,targets,status,created_by,created_at,result)
 				VALUES (?,?,?,?,?,?,?,?,?,?)`,
 				c.ID, c.AgentID, c.Action, c.Service, c.Project, tg,
 				c.Status, c.CreatedBy, c.CreatedAt, c.Result); err != nil {

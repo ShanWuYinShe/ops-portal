@@ -208,7 +208,7 @@
 					<label>类型</label>
 					<select class="input" bind:value={form.kind}>
 						<option value="human">human</option>
-						<option value="agent">agent</option>
+						<option value="portal-agent">portal-agent</option>
 					</select>
 				</div>
 				<div class="field">

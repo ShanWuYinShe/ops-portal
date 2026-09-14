@@ -10,7 +10,7 @@ import (
 // 机器证书；同宿主机 http:// 内网直连不受影响）。AGENT_CERT/AGENT_KEY 指向
 // portal「机器证书包」落盘的 PEM 文件。
 func agentClient() *http.Client {
-	certFile, keyFile := os.Getenv("AGENT_CERT"), os.Getenv("AGENT_KEY")
+	certFile, keyFile := os.Getenv("PORTAL_AGENT_CERT"), os.Getenv("PORTAL_AGENT_KEY")
 	if certFile == "" || keyFile == "" {
 		return http.DefaultClient
 	}

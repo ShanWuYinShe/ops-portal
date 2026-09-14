@@ -36,7 +36,8 @@
 ## 边缘 WAF 拦截（已上线，实测）
 
 规则 `ops-mtls-required`（动作 Block），无证/吊销证/非本账户 CA 证书在 CF 边缘
-直接拦截（实测返回 CF "Attention Required" 拦截页，不再到达源站）：
+直接拦截（实测返回 CF "Attention Required" 拦截页，不再到达源站）。
+上线时的规则文本（历史记录，注意彼时豁免了机器树路径）：
 
 ```text
 (http.host in {"ops.yinghuoren.com"} and
@@ -46,13 +47,18 @@
   or cf.tls_client_auth.cert_issuer_ski ne "F275E69E4459913F80F4D9A36BA5AE9129C721C6"))
 ```
 
+**2026-09-14 收紧**：`pki/cf_edge_setup.py` 的表达式本就无路径豁免（与
+`docs/portal-agent-protocol.md`「不留免证路径」一致），重跑脚本重建规则后，
+ops 域名全部路径（含 `/api/portal-agent/*`）在边缘强制 mTLS。机器请求
+本就持机器证书过边缘，收紧只影响无证探测，不影响任何合法客户端。
+
 两个实测踩坑：
 - SKI 条件必须用 `ne` 放在 or 链里——无证请求的 issuer_ski 是空串，
   写成 `and ... eq "SKI"` 会恒假导致无证请求不匹配、规则失效。
 - SKI 用**大写**（CF 官方示例格式），小写会导致有效证书被误拦。
-- 机器（agent）同样持机器证书（portal「机器证书包」签发，kind=agent），
-  边缘对全部路径强制 mTLS，无免证路径；agent 请求在 origin 侧再验
-  「证书在表 + token 同 agent_id」双因子。
+- 机器（agent）同样持机器证书（portal「机器证书包」签发，kind=portal-agent），
+  边缘对全部路径强制 mTLS，无免证路径；portal-agent 请求在 origin 侧再验
+  「证书在表 + token 同 portal_agent_id」双因子。
 - 发卡方 SKI 取自证书 Authority Key Identifier（非 CF API 返回的叶子 `ski` 字段）。
 
 ## 日常运维

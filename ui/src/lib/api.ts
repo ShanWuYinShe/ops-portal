@@ -46,11 +46,11 @@ export interface AgentContainer {
 }
 
 export interface Agent {
-	agent_id: string;
+	portal_agent_id: string;
 	last_seen: string;
 	pending: number;
 	heartbeat: {
-		agent_id: string;
+		portal_agent_id: string;
 		hostname: string;
 		compose_projects: string[];
 		sites: AgentSite[];
@@ -60,17 +60,17 @@ export interface Agent {
 
 /** 统一网站视图（/api/portal/sites）：按网站聚合的容器、git 与原生注册元数据。 */
 export interface SiteAgentRef {
-	agent_id: string;
+	portal_agent_id: string;
 	online: boolean;
 }
 
 /** 聚合视图中的容器/git 记录附带来源 agent（命令按机器下发）。 */
 export interface SiteContainer extends AgentContainer {
-	agent_id: string;
+	portal_agent_id: string;
 }
 
 export interface SiteGit extends AgentSite {
-	agent_id: string;
+	portal_agent_id: string;
 }
 
 export interface SiteOverview {
@@ -81,7 +81,7 @@ export interface SiteOverview {
 	ops_url?: string;
 	cert_serial?: string;
 	registered_at?: string;
-	source: 'agent' | 'native' | 'both';
+	source: 'portal-agent' | 'native' | 'both';
 	/** portal 拨测 ops_url 的结果；undefined = 未注册 ops_url 或尚未探测 */
 	reachable?: boolean;
 	checked_at?: string;
@@ -107,7 +107,7 @@ export interface CertRecord {
 
 export interface PortalCommand {
 	id: string;
-	agent_id: string;
+	portal_agent_id: string;
 	action: string;
 	service: string;
 	project: string;
@@ -120,11 +120,11 @@ export interface PortalCommand {
 
 export interface AgentToken {
 	id: string;
-	agent_id: string;
+	portal_agent_id: string;
 	created_by: string;
 	created_at: string;
 	revoked: boolean;
-	/** 正式 token 为 agent（旧数据无此字段），一次性注册令牌为 enroll */
+	/** 正式 token 为 portal-agent（旧数据无此字段），一次性注册令牌为 enroll */
 	kind?: string;
 	expires_at?: string;
 	used?: boolean;

@@ -5,12 +5,12 @@
 
 ## 模型
 
-边缘（Cloudflare）验人，源站认账；被管机跑 `ops-agent` 主动外连 portal，
+边缘（Cloudflare）验人，源站认账；被管机跑 `portal-agent` 主动外连 portal，
 portal 永不直连被管机。详见 `docs/cf-edge.md`。
 
-**网站是一等实体**：agent 心跳的 compose 项目与原生注册的网站汇入同一视图
+**网站是一等实体**：portal-agent 心跳的 compose 项目与原生注册的网站汇入同一视图
 （`GET /api/portal/sites`），UI 一律按网站分组展示与操作，详见
-`docs/agent-protocol.md` 的「统一网站视图」。
+`docs/portal-agent-protocol.md` 的「统一网站视图」。
 
 ## 本地联调
 
@@ -31,8 +31,8 @@ docker compose --profile dev up -d --build
 | 路径 | 说明 |
 |---|---|
 | `services/portal-nginx/` | 源站网关：Origin Pulls + X-Cert-* 透传 |
-| `services/portal-backend/` | Go 门禁 + agent 心跳 + 前端托管 |
-| `services/agent/` | Go 边车：docker 列表 + git 版本 + 心跳外连 |
+| `services/portal-backend/` | Go 门禁 + portal-agent 心跳 + 前端托管 |
+| `services/portal-agent/` | Go 边车：docker 列表 + git 版本 + 心跳外连 |
 | `ui/` | Svelte 5 空页（whoami + agents） |
 | `docs/cf-edge.md` | CF 边缘配置清单 |
 | `pki/` | dev 自签脚本（永不用于生产） |

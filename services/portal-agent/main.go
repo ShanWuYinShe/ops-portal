@@ -16,7 +16,7 @@ import (
 // 本地执行 → 回传结果。
 
 type heartbeatRequest struct {
-	AgentID         string              `json:"agent_id"`
+	AgentID         string              `json:"portal_agent_id"`
 	Hostname        string              `json:"hostname"`
 	ComposeProjects []string            `json:"compose_projects"`
 	Sites           []siteSnapshot      `json:"sites"`
@@ -38,7 +38,7 @@ func postHeartbeat(ctx context.Context, portalURL, token string, req heartbeatRe
 	opCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	httpReq, err := http.NewRequestWithContext(opCtx, http.MethodPost,
-		strings.TrimRight(portalURL, "/")+"/api/agent/heartbeat", bytes.NewReader(body))
+		strings.TrimRight(portalURL, "/")+"/api/portal-agent/heartbeat", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -62,18 +62,18 @@ func postHeartbeat(ctx context.Context, portalURL, token string, req heartbeatRe
 }
 
 func main() {
-	agentID := getEnv("AGENT_ID", "")
+	agentID := getEnv("PORTAL_AGENT_ID", "")
 	portalURL := getEnv("PORTAL_URL", "http://portal-backend:8319")
-	projects := splitCSV(getEnv("AGENT_COMPOSE_PROJECTS", ""))
-	sitesSpec := getEnv("AGENT_SITES", "")
-	deployDirs := parseDeployDirs(getEnv("AGENT_DEPLOY_DIRS", ""))
+	projects := splitCSV(getEnv("PORTAL_AGENT_COMPOSE_PROJECTS", ""))
+	sitesSpec := getEnv("PORTAL_AGENT_SITES", "")
+	deployDirs := parseDeployDirs(getEnv("PORTAL_AGENT_DEPLOY_DIRS", ""))
 	interval := getEnv("HEARTBEAT_INTERVAL", "10s")
 	dur, err := time.ParseDuration(interval)
 	if err != nil || dur <= 0 {
 		dur = 10 * time.Second
 	}
 	if agentID == "" {
-		log.Fatal("AGENT_ID is required")
+		log.Fatal("PORTAL_AGENT_ID is required")
 	}
 
 	ctx := context.Background()
@@ -90,7 +90,7 @@ func main() {
 	defer cli.Close()
 
 	hostname, _ := os.Hostname()
-	log.Printf("ops-agent %s -> %s every %s (projects=%v)", agentID, portalURL, dur, projects)
+	log.Printf("portal-agent %s -> %s every %s (projects=%v)", agentID, portalURL, dur, projects)
 
 	tick := time.NewTicker(dur)
 	defer tick.Stop()

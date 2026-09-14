@@ -13,7 +13,7 @@ import (
 
 type portalCommand struct {
 	ID        string   `json:"id"`
-	AgentID   string   `json:"agent_id"`
+	AgentID   string   `json:"portal_agent_id"`
 	Action    string   `json:"action"` // start / stop / restart / deploy
 	Service   string   `json:"service"`
 	Project   string   `json:"project"`
@@ -24,7 +24,7 @@ type portalCommand struct {
 	Result    string   `json:"result"`
 }
 
-const commandColumns = `id,agent_id,action,service,project,targets,status,created_by,created_at,result`
+const commandColumns = `id,portal_agent_id,action,service,project,targets,status,created_by,created_at,result`
 
 func marshalTargets(t []string) (string, error) {
 	if t == nil {
@@ -88,7 +88,7 @@ func enqueueCommand(cmd portalCommand) (*portalCommand, error) {
 		return nil, errors.New("invalid action")
 	}
 	if cmd.AgentID == "" {
-		return nil, errors.New("agent_id required")
+		return nil, errors.New("portal_agent_id required")
 	}
 	if cmd.Action == "deploy" {
 		if cmd.Project == "" || len(cmd.Targets) == 0 {
@@ -135,7 +135,7 @@ func takeCommands(agentID string) []portalCommand {
 	if err != nil {
 		return nil
 	}
-	rows, err := db.Query(`SELECT `+commandColumns+` FROM commands WHERE agent_id=? AND status='queued'`, agentID)
+	rows, err := db.Query(`SELECT `+commandColumns+` FROM commands WHERE portal_agent_id=? AND status='queued'`, agentID)
 	if err != nil {
 		return nil
 	}
@@ -179,7 +179,7 @@ func reportCommand(agentID, id, status, result string) error {
 	if err != nil {
 		return err
 	}
-	res, err := db.Exec(`UPDATE commands SET status=?, result=? WHERE id=? AND agent_id=?`,
+	res, err := db.Exec(`UPDATE commands SET status=?, result=? WHERE id=? AND portal_agent_id=?`,
 		status, result, id, agentID)
 	if err != nil {
 		return err
@@ -198,7 +198,7 @@ func listCommands(agentID string) []portalCommand {
 	q := `SELECT ` + commandColumns + ` FROM commands `
 	var args []any
 	if agentID != "" {
-		q += `WHERE agent_id=? `
+		q += `WHERE portal_agent_id=? `
 		args = append(args, agentID)
 	}
 	q += `ORDER BY created_at DESC LIMIT 100`
