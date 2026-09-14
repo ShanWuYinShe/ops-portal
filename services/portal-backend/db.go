@@ -36,8 +36,14 @@ CREATE TABLE IF NOT EXISTS certs (
   revoked_at TEXT NOT NULL DEFAULT '',
   note TEXT NOT NULL DEFAULT ''
 );
-CREATE INDEX IF NOT EXISTS idx_certs_serial ON certs(serial);
-CREATE INDEX IF NOT EXISTS idx_certs_fingerprint ON certs(fingerprint);
+-- 证书查表必须走索引：serial/指纹是 hex 串，CF 透传大写、建证返回小写，
+-- 故索引与查询都用 COLLATE NOCASE。BINARY 索引无法服务 NOCASE 比较
+-- （实测退化为全表扫描：5000 行下单次查表 633µs），显式声明 collation 后 13µs。
+CREATE INDEX IF NOT EXISTS idx_certs_serial_nocase ON certs(serial COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_certs_fingerprint_nocase ON certs(fingerprint COLLATE NOCASE);
+-- 清理旧版的 BINARY 索引（服务不了 NOCASE 比较，留着只增写入成本）
+DROP INDEX IF EXISTS idx_certs_serial;
+DROP INDEX IF EXISTS idx_certs_fingerprint;
 CREATE TABLE IF NOT EXISTS agent_tokens (
   id TEXT PRIMARY KEY,
   agent_id TEXT NOT NULL DEFAULT '',
@@ -55,6 +61,8 @@ CREATE TABLE IF NOT EXISTS users (
   role TEXT NOT NULL DEFAULT 'ops.viewer',
   cert_id TEXT NOT NULL DEFAULT ''
 );
+-- 每次请求都要按证书反查用户（currentUser），必须走索引
+CREATE INDEX IF NOT EXISTS idx_users_cert_id ON users(cert_id);
 CREATE TABLE IF NOT EXISTS sites (
   name TEXT PRIMARY KEY,
   ops_url TEXT NOT NULL DEFAULT '',

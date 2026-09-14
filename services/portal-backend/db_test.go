@@ -36,7 +36,7 @@ func TestMigrateLegacyJSON(t *testing.T) {
 	counts := map[string]int{}
 	for _, tbl := range []string{"certs", "agent_tokens", "users", "sites", "commands", "audit"} {
 		var n int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM `+tbl).Scan(&n); err != nil {
+		if err := db.QueryRow(`SELECT COUNT(*) FROM ` + tbl).Scan(&n); err != nil {
 			t.Fatalf("count %s: %v", tbl, err)
 		}
 		counts[tbl] = n
