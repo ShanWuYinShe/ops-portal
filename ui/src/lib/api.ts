@@ -119,6 +119,10 @@ export interface AgentToken {
 	created_by: string;
 	created_at: string;
 	revoked: boolean;
+	/** 正式 token 为 agent（旧数据无此字段），一次性注册令牌为 enroll */
+	kind?: string;
+	expires_at?: string;
+	used?: boolean;
 }
 
 export interface AuditEntry {

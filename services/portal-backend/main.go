@@ -63,6 +63,13 @@ func apiAgentHeartbeat(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "agent_id required")
 		return
 	}
+	// token 绑定的 agent_id 与上报身份必须一致（防持合法 token 冒充其他 agent
+	// 上报状态、偷走下发给他人的命令；legacy 单 token 回退时不绑定）。
+	if bound := agentIDFromContext(r); bound != "" && bound != hb.AgentID {
+		log.Printf("portal: heartbeat agent_id mismatch token=%s body=%s", bound, hb.AgentID)
+		writeError(w, http.StatusForbidden, "agent_id mismatch with token")
+		return
+	}
 	agentStore.Lock()
 	agentStore.m[hb.AgentID] = agentState{Heartbeat: hb, LastSeen: time.Now()}
 	agentStore.Unlock()
@@ -87,6 +94,11 @@ func apiAgentReport(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	if bound := agentIDFromContext(r); bound != "" && bound != body.AgentID {
+		log.Printf("portal: report agent_id mismatch token=%s body=%s", bound, body.AgentID)
+		writeError(w, http.StatusForbidden, "agent_id mismatch with token")
 		return
 	}
 	for _, rep := range body.Reports {
@@ -171,7 +183,13 @@ func requireAgentTokenV2(next http.HandlerFunc) http.HandlerFunc {
 				return
 			}
 		}
-		next(w, r)
+		// token 绑定的 agent_id 塞进 context，心跳/回传强制比对上报身份；
+		// legacy 单 token 回退（过渡期 dev）传空串表示不绑定。
+		bound := agentID
+		if bound == "legacy" {
+			bound = ""
+		}
+		next(w, r.WithContext(contextWithAgentID(r, bound)))
 	}
 }
 
@@ -188,10 +206,11 @@ func main() {
 	mux.HandleFunc("POST /api/portal/certs/register", requireRole("ops.admin", apiCertsAdd))
 	mux.HandleFunc("POST /api/portal/certs/revoke", requireRole("ops.admin", apiCertsRevoke))
 
-	// agent token（admin）
+	// agent token（admin）+ 一次性注册令牌（admin 签发，被管机自助兑换）
 	mux.HandleFunc("GET /api/portal/agent-tokens", requireRole("ops.admin", apiAgentTokens))
 	mux.HandleFunc("POST /api/portal/agent-tokens/issue", requireRole("ops.admin", apiAgentTokensIssue))
 	mux.HandleFunc("POST /api/portal/agent-tokens/revoke", requireRole("ops.admin", apiAgentTokensRevoke))
+	mux.HandleFunc("POST /api/portal/enroll-tokens/issue", requireRole("ops.admin", apiEnrollTokensIssue))
 
 	// 命令（读 viewer+，入队 operator+）
 	mux.HandleFunc("GET /api/portal/commands", requireRole("ops.viewer", apiCommandsList))
@@ -211,6 +230,8 @@ func main() {
 	mux.HandleFunc("POST /api/portal/agent-certificates/issue", requireRole("ops.admin", apiAgentCertificateIssue))
 
 	// agent 树（双因子：机器证书 + token；同宿主机内网直连仅 token，见 exec 说明）
+	// enroll 兑换不套 token 中间件：enroll 令牌本身即凭证（一次性，30 分钟）。
+	mux.HandleFunc("POST /api/agent/enroll", apiAgentEnroll)
 	mux.HandleFunc("POST /api/agent/heartbeat", requireAgentTokenV2(apiAgentHeartbeat))
 	mux.HandleFunc("POST /api/agent/report", requireAgentTokenV2(apiAgentReport))
 

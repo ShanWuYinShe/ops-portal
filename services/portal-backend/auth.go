@@ -94,21 +94,3 @@ func maskMiddle(s string) string {
 	}
 	return s[:6] + "..." + s[len(s)-6:]
 }
-
-// requireAgentToken 要求 agent 请求携带预共享 token。
-// agent 走独立的 /api/agent/* 树，与人用的证书门禁分离。
-func requireAgentToken(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		want := strings.TrimSpace(getEnv("AGENT_TOKEN", ""))
-		if want == "" {
-			writeError(w, http.StatusServiceUnavailable, "agent token not configured")
-			return
-		}
-		got := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
-		if got == "" || !constantTimeEqual(got, want) {
-			writeError(w, http.StatusUnauthorized, "invalid agent token")
-			return
-		}
-		next(w, r)
-	}
-}

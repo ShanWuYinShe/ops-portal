@@ -34,7 +34,7 @@ type reportItem struct {
 	Result string `json:"result"`
 }
 
-func findServiceContainer(ctx context.Context, cli *client.Client, service string, projects []string) (string, error) {
+func findServiceContainer(ctx context.Context, cli *client.Client, service, project string, projects []string) (string, error) {
 	opCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	list, err := cli.ContainerList(opCtx, container.ListOptions{All: true})
@@ -49,21 +49,30 @@ func findServiceContainer(ctx context.Context, cli *client.Client, service strin
 		if c.Labels["com.docker.compose.service"] != service {
 			continue
 		}
-		if len(allow) > 0 && !allow[c.Labels["com.docker.compose.project"]] {
+		proj := c.Labels["com.docker.compose.project"]
+		// project 非空时限定 compose 项目：多项目同名 service（如 nginx）不再误命中。
+		// 空串保持兼容：老 portal 下发的命令无 project，按白名单全局找。
+		if project != "" && proj != project {
+			continue
+		}
+		if len(allow) > 0 && !allow[proj] {
 			continue
 		}
 		return c.ID, nil
+	}
+	if project != "" {
+		return "", fmt.Errorf("service %q not found in project %q", service, project)
 	}
 	return "", fmt.Errorf("service %q not found in projects %v", service, projects)
 }
 
 // isSelfTarget 判断命令目标是否为 agent 自身容器。
 // compose 默认 hostname 即容器短 ID，目标完整 ID 以它开头即命中。
-func isSelfTarget(ctx context.Context, cli *client.Client, service string, projects []string, hostname string) bool {
+func isSelfTarget(ctx context.Context, cli *client.Client, service, project string, projects []string, hostname string) bool {
 	if hostname == "" {
 		return false
 	}
-	id, err := findServiceContainer(ctx, cli, service, projects)
+	id, err := findServiceContainer(ctx, cli, service, project, projects)
 	if err != nil {
 		return false
 	}
@@ -87,7 +96,7 @@ func execCommand(ctx context.Context, cli *client.Client, cmd inboundCommand, pr
 	default:
 		return reportItem{ID: cmd.ID, Status: "failed", Result: "invalid action"}
 	}
-	id, err := findServiceContainer(ctx, cli, cmd.Service, projects)
+	id, err := findServiceContainer(ctx, cli, cmd.Service, cmd.Project, projects)
 	if err != nil {
 		return reportItem{ID: cmd.ID, Status: "failed", Result: err.Error()}
 	}
@@ -144,7 +153,7 @@ func postReportOnce(ctx context.Context, portalURL, token string, body []byte) e
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := agentClient().Do(req)
 	if err != nil {
 		return err
 	}
@@ -166,7 +175,7 @@ func drainCommands(ctx context.Context, cli *client.Client, portalURL, token, ag
 		// 目标容器就是 agent 自己时（hostname 即容器短 ID），restart/stop
 		// 会杀掉本进程：先回传"即将执行"，结果由下次心跳的容器状态体现
 		// （Up 时间重置即成功）。deploy 不杀自己，无需预回传。
-		if (c.Action == "restart" || c.Action == "stop") && isSelfTarget(ctx, cli, c.Service, projects, hostname) {
+		if (c.Action == "restart" || c.Action == "stop") && isSelfTarget(ctx, cli, c.Service, c.Project, projects, hostname) {
 			rep := reportItem{ID: c.ID, Status: "done", Result: c.Action + " self: reported before exec, verify by container uptime"}
 			if err := postReport(ctx, portalURL, token, agentID, []reportItem{rep}); err != nil {
 				log.Printf("agent: report %s failed: %v", c.ID, err)

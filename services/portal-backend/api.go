@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 )
@@ -185,6 +186,76 @@ func apiCommandsEnqueue(w http.ResponseWriter, r *http.Request) {
 	}
 	audit(u.Username, "", "commands.enqueue", cmd.ID, "ok", body.Action+" "+body.Service+body.Project, r.RemoteAddr)
 	writeOK(w, map[string]any{"command": cmd})
+}
+
+// --- 一次性注册令牌（enroll，免人工复制长效 token）---
+
+func apiEnrollTokensIssue(w http.ResponseWriter, r *http.Request) {
+	if !mustMethod(w, r, http.MethodPost) {
+		return
+	}
+	var body struct {
+		AgentID string `json:"agent_id"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	u := actorOf(r)
+	plain, t, err := issueEnrollToken(strings.TrimSpace(body.AgentID), u.Username)
+	if err != nil {
+		audit(u.Username, "", "enroll_tokens.issue", body.AgentID, "fail", err.Error(), r.RemoteAddr)
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	audit(u.Username, "", "enroll_tokens.issue", t.ID, "ok", "agent="+t.AgentID, r.RemoteAddr)
+	// 明文只返回这一次（30 分钟有效、单次使用）
+	writeOK(w, map[string]any{"enroll_token": plain, "id": t.ID, "agent_id": t.AgentID, "expires_at": t.ExpiresAt})
+}
+
+// POST /api/agent/enroll —— 被管机自助换正式 token。
+// 认证：enroll 令牌本身（一次性）+ 经边缘时机器证书
+// （kind=agent 且 label==agent_id）双因子；同宿主机内网直连仅 enroll 令牌
+// （网络隔离，与 heartbeat 的双因子策略一致）。
+func apiAgentEnroll(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var body struct {
+		EnrollToken string `json:"enroll_token"`
+		AgentID     string `json:"agent_id"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	agentID := strings.TrimSpace(body.AgentID)
+	if strings.TrimSpace(body.EnrollToken) == "" || agentID == "" {
+		writeError(w, http.StatusBadRequest, "enroll_token and agent_id required")
+		return
+	}
+	id := certFromRequest(r)
+	if id.Trusted {
+		c := findActiveCert(id.Serial, id.Fingerprint)
+		if c == nil || c.Kind != "agent" || c.Label != agentID {
+			log.Printf("portal: enroll cert mismatch serial=%s", maskMiddle(id.Serial))
+			writeError(w, http.StatusForbidden, "agent certificate mismatch")
+			return
+		}
+	}
+	bound, err := consumeEnrollToken(strings.TrimSpace(body.EnrollToken), agentID)
+	if err != nil {
+		audit(agentID, "", "agent.enroll", agentID, "fail", err.Error(), r.RemoteAddr)
+		writeError(w, http.StatusUnauthorized, "invalid enroll token")
+		return
+	}
+	plain, tok, err := issueAgentToken(bound, "enroll:"+bound)
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	audit("enroll:"+bound, "", "agent.enroll", tok.ID, "ok", "agent="+bound, r.RemoteAddr)
+	writeOK(w, map[string]any{"token": plain, "id": tok.ID, "agent_id": bound})
 }
 
 // --- 审计 ---

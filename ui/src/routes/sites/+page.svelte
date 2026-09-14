@@ -11,20 +11,21 @@
 		both: 'agent + 原生'
 	};
 
-	async function act(agentId: string, service: string, action: string) {
+	async function act(agentId: string, project: string, service: string, action: string) {
 		const verb = { start: '启动', stop: '停止', restart: '重启' }[action] ?? action;
 		if (
 			!(await askConfirm(
 				`${verb}服务`,
-				`确定在 ${agentId} 上${verb} ${service} 吗？`,
+				`确定在 ${agentId} 上${verb} ${project} / ${service} 吗？`,
 				action !== 'start'
 			))
 		)
 			return;
 		try {
+			// project 限定 compose 项目：同一机器多站点同名 service 不再误命中。
 			await api('/api/portal/commands/enqueue', {
 				method: 'POST',
-				body: JSON.stringify({ agent_id: agentId, action, service })
+				body: JSON.stringify({ agent_id: agentId, action, service, project })
 			});
 			toast(`已下发：${verb} ${service}，agent 心跳时执行`);
 		} catch (e) {
@@ -104,8 +105,8 @@
 								<td class="font-mono text-ink-2">{c.image}</td>
 								<td class="text-right whitespace-nowrap">
 									{#if canOperate && site.agents.find((a) => a.agent_id === c.agent_id)?.online}
-										<button class="btn btn-sm" onclick={() => act(c.agent_id, c.service, 'restart')}>重启</button>
-										<button class="btn btn-sm" onclick={() => act(c.agent_id, c.service, 'stop')}>停止</button>
+										<button class="btn btn-sm" onclick={() => act(c.agent_id, c.project, c.service, 'restart')}>重启</button>
+										<button class="btn btn-sm" onclick={() => act(c.agent_id, c.project, c.service, 'stop')}>停止</button>
 									{/if}
 								</td>
 							</tr>

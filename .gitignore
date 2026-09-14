@@ -1,6 +1,8 @@
 # 构建产物与依赖
 services/portal-backend/portal-backend
+services/portal-backend/portal
 services/agent/ops-agent
+services/agent/agent
 ui/dist/
 ui/node_modules/
 

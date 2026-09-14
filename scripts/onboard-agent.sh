@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# ops-portal 被管机一键接入（自助注册换证，免手工复制 token）
+# ops-portal 被管机一键接入（自助注册，免手工复制长效 token）
 #
 # 前置：本机已 checkout ops-portal 仓库（脚本用 services/agent 构建镜像）；
-#       portal 已签发「机器证书包」bundle.json（含 agent_token/client_cert/
-#       client_key，由管理员在 portal 侧签发后交付本机）。
+#       管理员在 portal 侧交付 bundle.json（含 enroll_token/client_cert/
+#       client_key：注册令牌在「Agent 令牌」页签发，机器证书在
+#       「机器证书包」接口签发后拼成 bundle 交付本机）。
 #
 # 用法：
 #   bash scripts/onboard-agent.sh \
@@ -13,8 +14,10 @@
 #     --project hotspot --site hotspot:/srv/hotspot --deploy hotspot:/srv/hotspot \
 #     [--local]            # portal 与本 agent 同一 docker 宿主机时使用（走内网）
 #
-# 行为：curl 注册换正式 token → 生成 agent-compose.generated.yml → 构建启动 →
-#       提示到 portal「站点」页确认心跳出现。token 只写入该 compose 的 env。
+# 行为：落盘机器证书 → 生成 agent-compose.generated.yml（含 AGENT_ENROLL_TOKEN
+#       与证书/token 落盘挂载）→ 构建启动 → agent 首次启动自助兑换正式 token
+#       并落盘到 agent-secrets/ → 到 portal「站点」页确认心跳出现。
+#       长效 token 永不经人工手；enroll 令牌 30 分钟有效、单次使用。
 
 set -euo pipefail
 
@@ -37,16 +40,28 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$AGENT_ID" && -n "$BUNDLE" ]] || { echo "必须提供 --agent-id 与 --bundle" >&2; exit 1; }
+[[ -f "$BUNDLE" ]] || { echo "bundle 不存在: $BUNDLE" >&2; exit 1; }
 [[ -d services/agent ]] || { echo "请在 ops-portal 仓库根目录执行（需要 services/agent 构建上下文）" >&2; exit 1; }
 
 join() { local IFS=,; echo "$*"; }
 
-# 1) 读取机器证书包
-TOKEN=$(python3 -c "import json,sys;print(json.load(open('$BUNDLE'))['agent_token'])")
-[[ -n "$TOKEN" ]] || { echo "bundle 缺 agent_token" >&2; exit 1; }
-python3 -c "import json;d=json.load(open('$BUNDLE'));open('agent-client.crt','w').write(d['client_cert']);open('agent-client.key','w').write(d['client_key'])"
-chmod 600 agent-client.crt agent-client.key
-echo "==> 机器证书与 token 已就位（写入生成的 compose，勿外传）"
+# 1) 读取接入包：机器证书落盘（600），enroll 令牌只进 compose env
+BUNDLE_PATH="$BUNDLE" python3 - <<'EOF'
+import json, os
+d = json.load(open(os.environ["BUNDLE_PATH"]))
+for k in ("enroll_token", "client_cert", "client_key"):
+    if not d.get(k):
+        raise SystemExit(f"bundle 缺 {k}")
+open("agent-client.crt", "w").write(d["client_cert"])
+open("agent-client.key", "w").write(d["client_key"])
+open(".enroll_token.tmp", "w").write(d["enroll_token"])
+EOF
+chmod 600 agent-client.crt agent-client.key .enroll_token.tmp
+ENROLL=$(cat .enroll_token.tmp)
+rm -f .enroll_token.tmp
+mkdir -p agent-secrets
+chmod 700 agent-secrets
+echo "==> 机器证书已落盘（agent-client.crt/key），enroll 令牌已就位（勿外传）"
 
 # 2) 生成 compose
 if [[ $LOCAL -eq 1 ]]; then
@@ -85,9 +100,13 @@ services:
     environment:
       - TZ=Asia/Shanghai
       - AGENT_ID=${AGENT_ID}
-      - AGENT_TOKEN=${TOKEN}
-      - AGENT_CERT=./agent-client.crt
-      - AGENT_KEY=./agent-client.key
+      # 首次启动自助兑换正式 token（单次有效），成功后落盘到 AGENT_TOKEN_FILE；
+      # 重启优先读落盘 token，不再消耗 enroll。
+      - AGENT_ENROLL_TOKEN=${ENROLL}
+      - AGENT_TOKEN_FILE=/agent/secrets/agent-token
+      # 机器客户端证书（边缘 mTLS 出示；同机内网直连不受影响）
+      - AGENT_CERT=/agent/certs/client.crt
+      - AGENT_KEY=/agent/certs/client.key
       - PORTAL_URL=${PORTAL_URL}
       - AGENT_COMPOSE_PROJECTS=${PROJ_CSV}
       - AGENT_SITES=${SITE_CSV}
@@ -95,13 +114,17 @@ services:
       - HEARTBEAT_INTERVAL=10s
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./agent-client.crt:/agent/certs/client.crt:ro
+      - ./agent-client.key:/agent/certs/client.key:ro
+      - ./agent-secrets:/agent/secrets
 ${MOUNTS}${NETWORK}
 ${NETWORKS_DEF}
 EOF
 
 # 3) 构建启动
 docker compose -f "$COMPOSE_OUT" up -d --build
-echo "==> agent 已启动（容器 ${AGENT_ID}）"
-echo "==> 到 portal「站点与服务」页确认心跳出现（≤10 秒）。"
+echo "==> agent 已启动（容器 ${AGENT_ID}），首次启动自动兑换 token 并上报心跳"
+echo "==> 到 portal「站点与服务」页确认心跳出现（≤30 秒，含兑换）。"
 [[ $LOCAL -eq 1 ]] && echo "提示：--local 模式要求本机已运行 ops-portal 主 compose（网络 ops-portal_portal_net）。"
-echo "==> 更换 token/吊销：portal「Agent 令牌」页操作后，编辑 $COMPOSE_OUT 中 AGENT_TOKEN 并重新 up -d。"
+echo "==> 更换 token/吊销：portal「Agent 令牌」页吊销后，删 agent-secrets/agent-token，"
+echo "    重新签发 enroll 令牌并更新 $COMPOSE_OUT 中 AGENT_ENROLL_TOKEN，再 up -d。"

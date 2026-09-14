@@ -68,16 +68,16 @@
 	}
 
 	async function submitService() {
-		const [agentId, service] = svcTarget.split('|');
+		const [agentId, project, service] = svcTarget.split('|');
 		if (!agentId || !service) {
 			toast('先选择网站和服务', 'err');
 			return;
 		}
 		const verb = { start: '启动', stop: '停止', restart: '重启' }[svcAction];
 		const ok = await enqueue(
-			{ agent_id: agentId, action: svcAction, service },
+			{ agent_id: agentId, action: svcAction, service, project },
 			`${verb}服务`,
-			`${agentId} → ${verb} ${service}`,
+			`${agentId} → ${verb} ${project} / ${service}`,
 			svcAction !== 'start'
 		);
 		if (ok) svcTarget = '';
@@ -142,7 +142,7 @@
 					<select id="f-svcTarget" class="input" bind:value={svcTarget} disabled={!svcSiteObj}>
 						<option value="">选择</option>
 						{#each (svcSiteObj?.containers ?? []) as c (c.agent_id + c.id)}
-							<option value="{c.agent_id}|{c.service}">
+							<option value="{c.agent_id}|{c.project}|{c.service}">
 								{c.service}{svcSiteObj && svcSiteObj.agents.length > 1 ? ` @ ${c.agent_id}` : ''}
 							</option>
 						{/each}

@@ -93,6 +93,71 @@ func issueAgentToken(agentID, createdBy string) (string, *agentToken, error) {
 	return plain, &t, nil
 }
 
+// issueEnrollToken 签发一次性注册令牌（enroll_ 前缀，绑定 agent_id、
+// 30 分钟有效、单次使用）。被管机凭它调 POST /api/agent/enroll 换正式
+// token，免人工复制长效 token。库里只存摘要，与正式 token 一致。
+func issueEnrollToken(agentID, createdBy string) (string, *agentToken, error) {
+	if agentID == "" {
+		return "", nil, errors.New("agent_id required")
+	}
+	plain := "enroll_" + randHex(24)
+	tokensMu.Lock()
+	defer tokensMu.Unlock()
+	s, err := loadTokens()
+	if err != nil {
+		return "", nil, err
+	}
+	t := agentToken{
+		ID:        "enr-" + randHex(6),
+		AgentID:   agentID,
+		Hash:      sha256Hex(plain),
+		CreatedBy: createdBy,
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		Kind:      "enroll",
+		ExpiresAt: time.Now().Add(30 * time.Minute).UTC().Format(time.RFC3339),
+	}
+	s.Tokens = append(s.Tokens, t)
+	if err := saveTokens(s); err != nil {
+		return "", nil, err
+	}
+	return plain, &t, nil
+}
+
+// consumeEnrollToken 校验并核销一次性注册令牌，返回绑定的 agent_id。
+// 过期/已用/已吊销/串号一律失败（调用方对客户端统一报 invalid，不区分原因）。
+func consumeEnrollToken(plain, agentID string) (string, error) {
+	tokensMu.Lock()
+	defer tokensMu.Unlock()
+	s, err := loadTokens()
+	if err != nil {
+		return "", err
+	}
+	h := sha256Hex(plain)
+	for i := range s.Tokens {
+		t := &s.Tokens[i]
+		if t.Kind != "enroll" || t.Revoked || t.Used {
+			continue
+		}
+		if !constantTimeEqual(t.Hash, h) {
+			continue
+		}
+		if t.ExpiresAt != "" {
+			if exp, err := time.Parse(time.RFC3339, t.ExpiresAt); err == nil && time.Now().After(exp) {
+				return "", errors.New("enroll token expired")
+			}
+		}
+		if t.AgentID != agentID {
+			return "", errors.New("agent_id mismatch")
+		}
+		t.Used = true
+		if err := saveTokens(s); err != nil {
+			return "", err
+		}
+		return t.AgentID, nil
+	}
+	return "", errors.New("invalid enroll token")
+}
+
 // validAgentToken 校验 token 明文是否有效（未吊销）。
 func validAgentToken(plain string) (string, bool) {
 	tokensMu.Lock()

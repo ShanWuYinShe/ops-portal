@@ -44,7 +44,9 @@ func postHeartbeat(ctx context.Context, portalURL, token string, req heartbeatRe
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+token)
-	resp, err := http.DefaultClient.Do(httpReq)
+	// 出网经 agentClient：配了 AGENT_CERT/AGENT_KEY 时出示机器证书（边缘 mTLS）；
+	// 同机 http 内网直连不受影响。
+	resp, err := agentClient().Do(httpReq)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +64,6 @@ func postHeartbeat(ctx context.Context, portalURL, token string, req heartbeatRe
 func main() {
 	agentID := getEnv("AGENT_ID", "")
 	portalURL := getEnv("PORTAL_URL", "http://portal-backend:8319")
-	token := getEnv("AGENT_TOKEN", "")
 	projects := splitCSV(getEnv("AGENT_COMPOSE_PROJECTS", ""))
 	sitesSpec := getEnv("AGENT_SITES", "")
 	deployDirs := parseDeployDirs(getEnv("AGENT_DEPLOY_DIRS", ""))
@@ -74,8 +75,12 @@ func main() {
 	if agentID == "" {
 		log.Fatal("AGENT_ID is required")
 	}
-	if token == "" {
-		log.Fatal("AGENT_TOKEN is required")
+
+	ctx := context.Background()
+	// token 解析：AGENT_TOKEN / 落盘 / enroll 自注册三选一（见 enroll.go）。
+	token, err := resolveToken(ctx, portalURL, agentID)
+	if err != nil {
+		log.Fatalf("token: %v", err)
 	}
 
 	cli, err := newDockerClient()
@@ -87,7 +92,6 @@ func main() {
 	hostname, _ := os.Hostname()
 	log.Printf("ops-agent %s -> %s every %s (projects=%v)", agentID, portalURL, dur, projects)
 
-	ctx := context.Background()
 	tick := time.NewTicker(dur)
 	defer tick.Stop()
 	for {

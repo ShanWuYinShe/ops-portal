@@ -18,12 +18,11 @@
 - URL：`https://ops.yinghuoren.com/api/agent/*`（生产）或内网直连（同机联调）。
 - 认证：**双因子**——机器客户端证书（CF 托管 CA，kind=agent，过边缘 mTLS）
   + `Authorization: Bearer <agent-token>`。portal「Agent 令牌」页签发
-  「机器证书包」（agent_token/client_cert/client_key 一次下发），机器证书
+  「机器证书包」（client_cert/client_key 一次下发）与**一次性注册令牌**
+  （`enroll_` 前缀，见「注册」一节），机器证书
   在证书表登记并与 agent_id 绑定；同宿主机内网直连仅 token（网络隔离）。
 - 边缘 WAF 对 ops 域名**全部路径**强制 mTLS（含 /api/agent/*，机器也持证，
   不留免证路径）；token 泄露单独无效，必须连同机器证书才可通过边缘。
-边缘 WAF 规则对 `/api/agent/*` 路径豁免 mTLS（agent 有独立 token 鉴权），
-其余路径无证书一律边缘拦截。
 
 ## 证书分类（严格分域，互不混用）
 
@@ -79,15 +78,23 @@ POST /api/agent/enroll
 → {"ok": true, "token": "opsa_..."}
 ```
 
-agent 亦支持启动时自注册：设 `AGENT_ENROLL_TOKEN`（留空 `AGENT_TOKEN`），
-首次启动自动完成上述交换。一键接入：`scripts/onboard-agent.sh`（在被管机的
-仓库 checkout 内执行，生成 compose、注册、构建、启动一步完成）。
+兑换认证 = enroll 令牌本身 +（经边缘时）机器证书双因子；
+兑换成功后 enroll 令牌即作废，重放返回 401。
+
+agent 启动时自注册：设 `AGENT_ENROLL_TOKEN`（留空 `AGENT_TOKEN`），
+首次启动自动完成上述交换；配 `AGENT_TOKEN_FILE`（如 `/agent/secrets/agent-token`）
+则兑换到的 token 落盘（0600），重启优先读盘，不再消耗 enroll。
+一键接入：`scripts/onboard-agent.sh`（在被管机的
+仓库 checkout 内执行，落盘证书、生成 compose、构建、启动一步完成；
+bundle.json 由管理员交付，内含 enroll_token/client_cert/client_key）。
 
 ## 端点
 
 ### POST /api/agent/heartbeat
 
-agent 每 10s（可配 `HEARTBEAT_INTERVAL`）上报快照，响应体携带待执行命令。
+agent 默认每 10s（可配 `HEARTBEAT_INTERVAL`；本地 dev compose 设为 5s）上报快照，响应体携带待执行命令。
+上报的 agent_id 必须与 bearer token 绑定的 agent_id 一致（串号 403；过渡期
+ legacy 单 token 不校验）。
 
 请求体：
 
@@ -133,7 +140,7 @@ agent 每 10s（可配 `HEARTBEAT_INTERVAL`）上报快照，响应体携带待�
 
 | action | 参数 | 语义 |
 |---|---|---|
-| `start` / `stop` / `restart` | `service` | 按 compose service 名操作容器（项目白名单内） |
+| `start` / `stop` / `restart` | `service` + `project`（可选，强烈建议传） | 按 compose service 名操作容器（项目白名单内）；`project` 非空时限定 compose 项目，多站点同名 service 不再误命中。老 portal 不传 `project` 时保持全局查找（兼容）。 |
 | `deploy` | `project` + `targets[]` | `docker compose -p <project> --project-directory <dir> up -d --build <targets...>`，只重建受影响服务 |
 
 命令生命周期：`queued → acked（agent 取走）→ done | failed`。
@@ -150,10 +157,12 @@ agent 侧双重白名单：`AGENT_COMPOSE_PROJECTS`（项目）+ `AGENT_DEPLOY_D
 ### 新机器（首次）
 
 1. 机器上 checkout ops-portal 仓库（远程仓库建好后 `git clone` 即可）。
-2. portal「Agent 令牌」页签发注册令牌（填 agent_id，如 `agent-<机器名>-01`）。
-3. 跑 `scripts/onboard-agent.sh`（参数：--portal --agent-id --enroll-token
+2. 管理员交付 `bundle.json`（portal「Agent 令牌」页签发注册令牌填 agent_id，
+   如 `agent-<机器名>-01`；机器证书包拼入 bundle 后交付本机）。
+3. 跑 `scripts/onboard-agent.sh`（参数：--portal --agent-id --bundle
    --project/--site/--deploy 可多次，--local 仅限与 portal 同宿主机）。
-4. portal「站点与服务」页确认心跳出现。完成。
+   agent 首次启动自动兑换正式 token 并落盘，心跳随后出现。
+4. portal「站点与服务」页确认心跳出现（≤30 秒，含兑换）。完成。
 
 ### 已接入机器上新增站点
 
