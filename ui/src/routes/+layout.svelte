@@ -1,11 +1,10 @@
 <script lang="ts">
 	import '../app.css';
-	import { onDestroy } from 'svelte';
 	import {
 		LayoutDashboard,
 		Server,
 		TerminalSquare,
-		ShieldCheck,
+		Users,
 		KeyRound,
 		History
 	} from '@lucide/svelte';
@@ -21,9 +20,9 @@
 		{ group: '站点管理' },
 		{ href: '/sites', label: '站点与服务', icon: Server },
 		{ href: '/ops', label: '命令与发布', icon: TerminalSquare },
-		{ group: '安全与审计', adminOnly: true },
-		{ href: '/certs', label: '设备证书', icon: ShieldCheck, adminOnly: true },
-		{ href: '/tokens', label: 'Portal-Agent 令牌', icon: KeyRound, adminOnly: true },
+		{ group: '访问控制', adminOnly: true },
+		{ href: '/certs', label: '用户与设备', icon: Users, adminOnly: true },
+		{ href: '/tokens', label: '机器凭据', icon: KeyRound, adminOnly: true },
 		{ href: '/audit', label: '审计日志', icon: History, adminOnly: true }
 	];
 
@@ -32,13 +31,12 @@
 		path = location.pathname;
 	});
 
-	let timer: ReturnType<typeof setInterval>;
 	$effect(() => {
 		loadPortal();
-		timer = setInterval(() => {
+		const t = setInterval(() => {
 			if (!document.hidden) loadPortal();
 		}, 15000);
-		return () => clearInterval(timer);
+		return () => clearInterval(t);
 	});
 
 	$effect(() => {

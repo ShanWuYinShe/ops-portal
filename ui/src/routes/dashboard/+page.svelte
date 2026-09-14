@@ -1,80 +1,57 @@
 <script lang="ts">
-	import { api, type CertRecord, type PortalCommand } from '$lib/api';
 	import { agentOnline, badgeCls, portal, relTime } from '$lib/state.svelte';
+	import SiteHealthBadge from '$lib/SiteHealthBadge.svelte';
 
-	let certs = $state<CertRecord[]>([]);
-	let commands = $state<PortalCommand[]>([]);
+	// 仪表盘只做摘要与跳转入口：站点运行详情在 /sites，操作在 /ops。
+	// 勿在此重复 sites 的表格/操作——数据源同为全局 portal 状态（layout 轮询）。
 
 	const online = $derived(portal.agents.filter((a) => agentOnline(a.last_seen)));
 	const containers = $derived(portal.agents.flatMap((a) => a.heartbeat?.containers ?? []));
 	const running = $derived(containers.filter((c) => c.state === 'running'));
-	const pending = $derived(commands.filter((c) => c.status === 'queued' || c.status === 'acked'));
-	const activeCerts = $derived(certs.filter((c) => c.status === 'active'));
 	const sitesWithRuntime = $derived(portal.sites.filter((s) => s.containers.length > 0));
-
-	$effect(() => {
-		const load = async () => {
-			try {
-				const [c, cmd] = await Promise.all([
-					api<{ certs: CertRecord[] }>('/api/portal/certs'),
-					api<{ commands: PortalCommand[] }>('/api/portal/commands')
-				]);
-				certs = c.certs ?? [];
-				commands = cmd.commands ?? [];
-			} catch {
-				/* 轮询容错 */
-			}
-		};
-		load();
-		const t = setInterval(() => {
-			if (!document.hidden) load();
-		}, 10000);
-		return () => clearInterval(t);
-	});
 </script>
 
-<div class="mb-4.5 flex items-center justify-between">
-	<div>
-		<h1 class="page-title">仪表盘</h1>
-		<div class="page-sub">全部站点实时概览 · 每 10 秒自动刷新</div>
-	</div>
+<div class="mb-4.5">
+	<h1 class="page-title">仪表盘</h1>
+	<div class="page-sub">全部站点实时概览 · 随全局刷新更新</div>
 </div>
 
 <div class="mb-4.5 grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3.5">
-	<div class="card p-4">
+	<a class="card p-4 transition-colors hover:border-primary" href="/sites">
 		<div class="text-xs text-ink-muted">网站</div>
 		<div class="mt-0.5 text-2xl font-bold">
 			{sitesWithRuntime.length}<span class="text-sm text-ink-muted"> / {portal.sites.length}</span>
 		</div>
 		<div class="mt-0.5 text-xs text-ink-2">有运行实例 / 已接入</div>
-	</div>
-	<div class="card p-4">
+	</a>
+	<a class="card p-4 transition-colors hover:border-primary" href="/sites">
 		<div class="text-xs text-ink-muted">Agent 在线</div>
 		<div class="mt-0.5 text-2xl font-bold">
 			{online.length}<span class="text-sm text-ink-muted"> / {portal.agents.length}</span>
 		</div>
 		<div class="mt-0.5 text-xs text-ink-2">被管主机</div>
-	</div>
-	<div class="card p-4">
+	</a>
+	<a class="card p-4 transition-colors hover:border-primary" href="/sites">
 		<div class="text-xs text-ink-muted">容器运行</div>
 		<div class="mt-0.5 text-2xl font-bold">
 			{running.length}<span class="text-sm text-ink-muted"> / {containers.length}</span>
 		</div>
 		<div class="mt-0.5 text-xs text-ink-2">全部 compose 服务</div>
-	</div>
-	<div class="card p-4">
-		<div class="text-xs text-ink-muted">待执行命令</div>
-		<div class="mt-0.5 text-2xl font-bold">{pending.length}</div>
-		<div class="mt-0.5 text-xs text-ink-2">队列中的操作</div>
-	</div>
-	<div class="card p-4">
-		<div class="text-xs text-ink-muted">有效证书</div>
-		<div class="mt-0.5 text-2xl font-bold">{activeCerts.length}</div>
-		<div class="mt-0.5 text-xs text-ink-2">已登记设备/portal-agent</div>
-	</div>
+	</a>
+	<a class="card p-4 transition-colors hover:border-primary" href="/ops">
+		<div class="text-xs text-ink-muted">发布与命令</div>
+		<div class="mt-0.5 text-2xl font-bold">→</div>
+		<div class="mt-0.5 text-xs text-ink-2">deploy / 重启 / 历史查询</div>
+	</a>
+	<a class="card p-4 transition-colors hover:border-primary" href="/certs">
+		<div class="text-xs text-ink-muted">用户与设备</div>
+		<div class="mt-0.5 text-2xl font-bold">→</div>
+		<div class="mt-0.5 text-xs text-ink-2">证书登记 / 登录绑定</div>
+	</a>
 </div>
 
 <div class="card">
+	<div class="card-head"><h2 class="text-base font-semibold">站点健康一览</h2></div>
 	{#if portal.sites.length === 0}
 		<div class="card-body">
 			<div class="p-8 text-center text-[13px] text-ink-muted">
@@ -83,30 +60,30 @@
 		</div>
 	{:else}
 		<table class="table">
-			<thead>
-				<tr><th>网站</th><th>来源</th><th>部署机器</th><th>容器</th><th>版本</th><th>ops 接口</th></tr>
-			</thead>
 			<tbody>
 				{#each portal.sites as s (s.name)}
 					<tr>
-						<td><b>{s.name}</b></td>
-						<td class="text-ink-2">{s.source === 'native' ? '原生注册' : s.source === 'both' ? 'portal-agent + 原生' : 'portal-agent'}</td>
+						<td class="w-px whitespace-nowrap">
+							<a class="hover:text-primary" href="/sites"><b>{s.name}</b></a>
+						</td>
+						<td><SiteHealthBadge site={s} /></td>
 						<td>
 							{#each s.agents as a (a.portal_agent_id)}
 								<span class="badge mr-1 {badgeCls(a.online ? 'ok' : 'err')}">{a.portal_agent_id}</span>
 							{/each}
 						</td>
-						<td>
-							{s.containers.filter((c) => c.state === 'running').length} 运行 / {s.containers.length} 总数
+						<td class="text-ink-2">
+							{#if s.containers.length}
+								{s.containers.filter((c) => c.state === 'running').length} 运行 / {s.containers.length} 容器
+							{/if}
 						</td>
-						<td>
+						<td class="text-right">
 							{#each s.git as g (g.portal_agent_id + g.name)}
 								<span class="font-mono text-[12.5px] text-ink-2">
 									<span class="badge mr-1 {badgeCls(g.dirty ? 'warn' : 'ok')}">{g.branch}</span>@{g.head?.slice(0, 10)}
 								</span>
 							{/each}
 						</td>
-						<td class="font-mono text-xs text-ink-2">{s.ops_url || '—'}</td>
 					</tr>
 				{/each}
 			</tbody>
@@ -117,7 +94,7 @@
 <div class="card mt-4.5">
 	<div class="card-head">
 		<h2 class="text-base font-semibold">Agent 主机</h2>
-		<span class="text-xs text-ink-muted">心跳来源</span>
+		<span class="text-xs text-ink-muted">心跳来源 · 掉线时审计记 alert.agent_offline</span>
 	</div>
 	<div class="card-body">
 		{#if portal.agents.length === 0}

@@ -1,18 +1,22 @@
 <script lang="ts">
 	import { api, type AgentToken } from '$lib/api';
 	import { shortTime } from '$lib/state.svelte';
+	import { poll } from '$lib/poll';
+	import SecretReveal from '$lib/SecretReveal.svelte';
 	import { askConfirm, toast } from '$lib/dialogs.svelte';
+
+	// 本页集中所有"机器"凭据的签发与管理：portal-agent 令牌/证书包、
+	// portal 出访 service 证书、被管网站 site 注册证书。
+	// 人类设备证书与登录绑定在「用户与设备」页，勿在此重复。
 
 	let tokens = $state<AgentToken[]>([]);
 	let agentID = $state('');
 	let lastPlain = $state('');
-	let copied = $state(false);
 	// 一次性注册令牌（enroll_，30 分钟有效）：被管机自助兑换正式 token，
 	// 长效 token 永不经人工手（见 docs/portal-agent-protocol.md「注册」）。
 	let enrollAgentID = $state('');
 	let lastEnroll = $state('');
 	let lastEnrollExpires = $state('');
-	let enrollCopied = $state(false);
 
 	async function load() {
 		try {
@@ -24,7 +28,7 @@
 	}
 
 	$effect(() => {
-		load();
+		poll(load, 20000);
 	});
 
 	async function issue() {
@@ -38,7 +42,6 @@
 				body: JSON.stringify({ portal_agent_id: agentID })
 			});
 			lastPlain = r.token;
-			copied = false;
 			toast(`已为 ${r.portal_agent_id} 签发 token，仅显示一次`);
 			agentID = '';
 			await load();
@@ -62,7 +65,6 @@
 			);
 			lastEnroll = r.enroll_token;
 			lastEnrollExpires = r.expires_at;
-			enrollCopied = false;
 			toast(`已为 ${r.portal_agent_id} 签发一次性注册令牌，仅显示一次`);
 			enrollAgentID = '';
 			await load();
@@ -136,23 +138,60 @@
 		}
 	}
 
-	async function copyPlain() {
+	// --- service 证书（portal 出访被管网站 ops 接口的客户端证书）---
+	let svcInfo = $state<{ serial: string; fingerprint: string; expires_at: string } | null>(null);
+
+	async function issueService() {
+		if (
+			!(await askConfirm(
+				'签发 service 证书',
+				'已有证书则直接复用（幂等）。新签发后所有被管网站放行清单需同步更新 serial，确认继续？',
+				false
+			))
+		)
+			return;
 		try {
-			await navigator.clipboard.writeText(lastPlain);
-			copied = true;
-		} catch {
-			toast('复制失败，请手动选择复制', 'err');
+			const r = await api<{ serial: string; fingerprint: string; expires_at: string }>(
+				'/api/portal/service-cert/issue',
+				{ method: 'POST', body: '{}' }
+			);
+			svcInfo = r;
+			toast('service 证书就绪：把 serial 钉死到各被管网站放行清单');
+		} catch (e) {
+			toast('签发失败：' + (e as Error).message, 'err');
+		}
+	}
+
+	// --- site 注册证书（被管网站自助登记 ops_url 用）---
+	let siteName = $state('');
+	let siteBundle = $state<{ serial: string; client_cert: string; client_key: string } | null>(null);
+
+	async function issueSite() {
+		if (!siteName) {
+			toast('site_name 必填（与注册名/证书 label 一致）', 'err');
+			return;
+		}
+		try {
+			const r = await api<{ serial: string; client_cert: string; client_key: string }>(
+				'/api/portal/site-certificates/issue',
+				{ method: 'POST', body: JSON.stringify({ site_name: siteName }) }
+			);
+			siteBundle = r;
+			toast(`已为 ${siteName} 签发注册证书包，仅显示一次`, 'ok', 5200);
+			siteName = '';
+		} catch (e) {
+			toast('签发失败：' + (e as Error).message, 'err');
 		}
 	}
 </script>
 
 <div class="mb-4.5">
-	<h1 class="page-title">Portal-Agent 令牌</h1>
-	<div class="page-sub">被管机接入凭证 · 一机一枚 · portal 只存摘要</div>
+	<h1 class="page-title">机器凭据</h1>
+	<div class="page-sub">portal-agent 令牌与证书包 · service / site 证书 · portal 只存摘要</div>
 </div>
 
 <div class="card">
-	<div class="card-head"><h2 class="text-base font-semibold">签发一次性注册令牌（推荐）</h2></div>
+	<div class="card-head"><h2 class="text-base font-semibold">一次性注册令牌（推荐）</h2></div>
 	<div class="card-body">
 		<div class="text-[13px] text-ink-2">
 			被管机凭此令牌自助兑换正式 token（30 分钟有效、单次使用），配合
@@ -167,19 +206,16 @@
 			<button class="btn btn-primary" onclick={issueEnroll}>签发注册令牌</button>
 		</div>
 		{#if lastEnroll}
-			<div class="mt-4 rounded-[7px] border border-[#f1d9a1] bg-warn-soft p-3">
-				<div class="mb-1.5 font-semibold">请立即复制（{lastEnrollExpires} 前有效，用一次即废）：</div>
-				<div class="flex items-center gap-2.5">
-					<code class="flex-1 break-all font-mono text-[12.5px]">{lastEnroll}</code>
-					<button class="btn btn-sm" onclick={async () => { try { await navigator.clipboard.writeText(lastEnroll); enrollCopied = true; } catch { toast('复制失败，请手动选择复制', 'err'); } }}>{enrollCopied ? '已复制' : '复制'}</button>
-				</div>
-			</div>
+			<SecretReveal
+				headline="请立即复制（{lastEnrollExpires} 前有效，用一次即废）："
+				mono={lastEnroll}
+			/>
 		{/if}
 	</div>
 </div>
 
 <div class="card mt-4.5">
-	<div class="card-head"><h2 class="text-base font-semibold">签发新令牌（直接发长效 token，不推荐）</h2></div>
+	<div class="card-head"><h2 class="text-base font-semibold">直接签发长效 token（不推荐）</h2></div>
 	<div class="card-body">
 		<div class="flex flex-wrap items-end gap-2.5">
 			<div class="field">
@@ -190,19 +226,13 @@
 			<button class="btn btn-primary" onclick={issue}>签发</button>
 		</div>
 		{#if lastPlain}
-			<div class="mt-4 rounded-[7px] border border-[#f1d9a1] bg-warn-soft p-3">
-				<div class="mb-1.5 font-semibold">请立即复制（关闭后不再显示）：</div>
-				<div class="flex items-center gap-2.5">
-					<code class="flex-1 break-all font-mono text-[12.5px]">{lastPlain}</code>
-					<button class="btn btn-sm" onclick={copyPlain}>{copied ? '已复制' : '复制'}</button>
-				</div>
-			</div>
+			<SecretReveal headline="请立即复制（关闭后不再显示）：" mono={lastPlain} />
 		{/if}
 	</div>
 </div>
 
 <div class="card mt-4.5">
-	<div class="card-head"><h2 class="text-base font-semibold">签发机器证书包（补发/调试用）</h2></div>
+	<div class="card-head"><h2 class="text-base font-semibold">机器证书包（补发/调试用）</h2></div>
 	<div class="card-body">
 		<div class="text-[13px] text-ink-2">
 			一次发放机器证书 + 正式 token（需服务器配好 CF_API_TOKEN）。日常接入请用上面的注册令牌流程。
@@ -215,11 +245,49 @@
 			<button class="btn btn-primary" onclick={issueBundle}>签发证书包</button>
 		</div>
 		{#if bundle}
-			<div class="mt-4 rounded-[7px] border border-[#f1d9a1] bg-warn-soft p-3">
-				<div class="mb-1.5 font-semibold">证书包仅显示一次（serial {bundle.serial.slice(0, 18)}…，有效期至 {bundle.expires_at.slice(0, 10)}），请立即交付被管机：</div>
-				<div class="mb-1 font-mono text-[12.5px]">portal_agent_token: <code class="break-all">{bundle.portal_agent_token}</code></div>
-				<code class="block max-h-40 overflow-auto whitespace-pre-wrap break-all font-mono text-[12px]">{bundle.client_cert}{bundle.client_key}</code>
+			<SecretReveal
+				headline="证书包仅显示一次（serial {bundle.serial.slice(0, 18)}…，有效期至 {bundle.expires_at.slice(0, 10)}），请立即交付被管机："
+				blob={`portal_agent_token: ${bundle.portal_agent_token}\n${bundle.client_cert}${bundle.client_key}`}
+			/>
+		{/if}
+	</div>
+</div>
+
+<div class="card mt-4.5">
+	<div class="card-head"><h2 class="text-base font-semibold">service 证书（portal 出访凭证）</h2></div>
+	<div class="card-body">
+		<div class="text-[13px] text-ink-2">
+			portal 主动调用被管网站 <code class="font-mono">/ops/v1/*</code>
+		 时出示；各被管网站放行清单钉死其 serial。幂等：已签发则直接复用。
+		</div>
+		<div class="mt-2.5">
+			<button class="btn btn-primary" onclick={issueService}>签发 / 查看 service 证书</button>
+		</div>
+		{#if svcInfo}
+			<div class="mt-3 font-mono text-[12.5px]">
+				<div>serial: <b>{svcInfo.serial}</b></div>
+				<div class="text-ink-2">fingerprint: {svcInfo.fingerprint}</div>
+				<div class="text-ink-2">有效期至: {svcInfo.expires_at}</div>
 			</div>
+		{/if}
+	</div>
+</div>
+
+<div class="card mt-4.5">
+	<div class="card-head"><h2 class="text-base font-semibold">site 注册证书（被管网站自助登记用）</h2></div>
+	<div class="card-body">
+		<div class="flex flex-wrap items-end gap-2.5">
+			<div class="field">
+				<label for="f-siteName">Site 名称</label>
+				<input id="f-siteName" class="input" placeholder="如 hotspot" bind:value={siteName} />
+			</div>
+			<button class="btn btn-primary" onclick={issueSite}>签发注册证书包</button>
+		</div>
+		{#if siteBundle}
+			<SecretReveal
+				headline="证书包仅显示一次（serial {siteBundle.serial.slice(0, 18)}…），请立即交付被管网站："
+				blob={`${siteBundle.client_cert}${siteBundle.client_key}`}
+			/>
 		{/if}
 	</div>
 </div>

@@ -1,25 +1,21 @@
 <script lang="ts">
 	import { api, type AuditEntry } from '$lib/api';
 	import { badgeCls, badgeOf, shortTime } from '$lib/state.svelte';
+	import { poll } from '$lib/poll';
 	import { askConfirm, toast } from '$lib/dialogs.svelte';
 
 	let entries = $state<AuditEntry[]>([]);
 	let filter = $state('');
 
 	$effect(() => {
-		const load = async () => {
+		poll(async () => {
 			try {
 				const r = await api<{ entries: AuditEntry[] }>('/api/portal/audit');
 				entries = r.entries ?? [];
 			} catch {
 				/* 轮询容错 */
 			}
-		};
-		load();
-		const t = setInterval(() => {
-			if (!document.hidden) load();
 		}, 15000);
-		return () => clearInterval(t);
 	});
 
 	const filtered = $derived(

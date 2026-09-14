@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { api, type SiteOverview } from '$lib/api';
 	import { badgeCls, badgeOf, portal, roleLevel } from '$lib/state.svelte';
+	import SiteHealthBadge from '$lib/SiteHealthBadge.svelte';
 	import { askConfirm, toast } from '$lib/dialogs.svelte';
 
 	const canOperate = $derived(roleLevel(portal.whoami?.role) >= 2);
@@ -73,6 +74,9 @@
 		</div>
 	</div>
 {:else}
+	<div class="mb-3.5 flex items-center gap-2 text-[13px] text-ink-muted">
+		发布重建等批量操作在 <a class="text-primary hover:underline" href="/ops">命令与发布</a> 页。
+	</div>
 	{#each portal.sites as site (site.name)}
 		<div class="card mt-3.5">
 			<div class="card-head flex-wrap">
@@ -100,19 +104,7 @@
 						<span class="font-mono text-xs text-ink-muted" title="原生注册的 ops 接口">
 							{site.ops_url}
 						</span>
-						{#if site.reachable === true && (!site.health || site.health === 'ok')}
-							<span class="badge bg-ok-soft text-ok" title="portal 拨测 {site.ops_url}/ops/v1/health 通过">可达</span>
-						{:else if site.reachable === true && site.health === 'degraded'}
-							<span class="badge bg-warn-soft text-warn" title="站点自报降级，就绪但有依赖故障">降级</span>
-						{:else if site.reachable === true && site.health === 'starting'}
-							<span class="badge bg-warn-soft text-warn" title="站点自报启动中（迁移/预热），稍后自愈">启动中</span>
-						{:else if site.reachable === true}
-							<span class="badge bg-err-soft text-err" title="站点自报不可服务（ok:false）">故障</span>
-						{:else if site.reachable === false}
-							<span class="badge bg-err-soft text-err" title="portal 拨测失败，检查接口与放行清单">不可达</span>
-						{:else}
-							<span class="badge" title="尚未拨测（等 service 证书签发后的下一轮）">未探测</span>
-						{/if}
+						<SiteHealthBadge site={site} />
 						{#if isAdmin}
 							<button class="btn btn-sm btn-danger" onclick={() => unregister(site)}>注销注册</button>
 						{/if}
@@ -142,8 +134,12 @@
 								<td class="font-mono text-ink-2">{c.image}</td>
 								<td class="text-right whitespace-nowrap">
 									{#if canOperate && site.agents.find((a) => a.portal_agent_id === c.portal_agent_id)?.online}
-										<button class="btn btn-sm" onclick={() => act(c.portal_agent_id, c.project, c.service, 'restart')}>重启</button>
-										<button class="btn btn-sm" onclick={() => act(c.portal_agent_id, c.project, c.service, 'stop')}>停止</button>
+										{#if c.state === 'running'}
+											<button class="btn btn-sm" onclick={() => act(c.portal_agent_id, c.project, c.service, 'restart')}>重启</button>
+											<button class="btn btn-sm" onclick={() => act(c.portal_agent_id, c.project, c.service, 'stop')}>停止</button>
+										{:else}
+											<button class="btn btn-sm" onclick={() => act(c.portal_agent_id, c.project, c.service, 'start')}>启动</button>
+										{/if}
 									{/if}
 								</td>
 							</tr>
