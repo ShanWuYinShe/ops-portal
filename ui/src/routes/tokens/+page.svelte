@@ -71,6 +71,50 @@
 		}
 	}
 
+	// 机器证书包：机器证书 + 正式 token 一次发放（需服务器配 CF_API_TOKEN）。
+	// 推荐流程仍是「注册令牌 + onboard 脚本自注册」；本入口用于补发/调试。
+	let bundleAgentID = $state('');
+	let bundle = $state<{
+		agent_token: string;
+		client_cert: string;
+		client_key: string;
+		serial: string;
+		expires_at: string;
+	} | null>(null);
+
+	async function issueBundle() {
+		if (!bundleAgentID) {
+			toast('agent_id 必填', 'err');
+			return;
+		}
+		if (
+			!(await askConfirm(
+				'签发机器证书包',
+				`为 ${bundleAgentID} 签发机器证书 + 正式 token（CF 托管 CA，包内 token 为长效）。确认被管机可信交付？`,
+				true
+			))
+		)
+			return;
+		try {
+			const r = await api<{
+				agent_token: string;
+				client_cert: string;
+				client_key: string;
+				serial: string;
+				expires_at: string;
+			}>('/api/portal/agent-certificates/issue', {
+				method: 'POST',
+				body: JSON.stringify({ agent_id: bundleAgentID })
+			});
+			bundle = r;
+			toast(`已签发 ${bundleAgentID} 的机器证书包，仅显示一次`, 'ok', 5200);
+			bundleAgentID = '';
+			await load();
+		} catch (e) {
+			toast('签发失败：' + (e as Error).message, 'err');
+		}
+	}
+
 	async function revoke(t: AgentToken) {
 		if (
 			!(await askConfirm(
@@ -152,6 +196,29 @@
 					<code class="flex-1 break-all font-mono text-[12.5px]">{lastPlain}</code>
 					<button class="btn btn-sm" onclick={copyPlain}>{copied ? '已复制' : '复制'}</button>
 				</div>
+			</div>
+		{/if}
+	</div>
+</div>
+
+<div class="card mt-4.5">
+	<div class="card-head"><h2 class="text-base font-semibold">签发机器证书包（补发/调试用）</h2></div>
+	<div class="card-body">
+		<div class="text-[13px] text-ink-2">
+			一次发放机器证书 + 正式 token（需服务器配好 CF_API_TOKEN）。日常接入请用上面的注册令牌流程。
+		</div>
+		<div class="mt-2.5 flex flex-wrap items-end gap-2.5">
+			<div class="field">
+				<label for="f-bundleAgent">Agent ID</label>
+				<input id="f-bundleAgent" class="input" placeholder="如 agent-hotspot-01" bind:value={bundleAgentID} />
+			</div>
+			<button class="btn btn-primary" onclick={issueBundle}>签发证书包</button>
+		</div>
+		{#if bundle}
+			<div class="mt-4 rounded-[7px] border border-[#f1d9a1] bg-warn-soft p-3">
+				<div class="mb-1.5 font-semibold">证书包仅显示一次（serial {bundle.serial.slice(0, 18)}…，有效期至 {bundle.expires_at.slice(0, 10)}），请立即交付被管机：</div>
+				<div class="mb-1 font-mono text-[12.5px]">agent_token: <code class="break-all">{bundle.agent_token}</code></div>
+				<code class="block max-h-40 overflow-auto whitespace-pre-wrap break-all font-mono text-[12px]">{bundle.client_cert}{bundle.client_key}</code>
 			</div>
 		{/if}
 	</div>

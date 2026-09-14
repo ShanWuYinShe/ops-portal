@@ -219,10 +219,16 @@ func main() {
 	// 审计（admin）
 	mux.HandleFunc("GET /api/portal/audit", requireRole("ops.admin", apiAuditList))
 
+	// 用户与证书绑定（admin）
+	mux.HandleFunc("GET /api/portal/users", requireRole("ops.admin", apiUsersList))
+	mux.HandleFunc("POST /api/portal/users/upsert", requireRole("ops.admin", apiUsersUpsert))
+	mux.HandleFunc("POST /api/portal/users/remove", requireRole("ops.admin", apiUsersRemove))
+
 	// 统一网站视图（心跳 + 原生注册合并，viewer+；签发类操作仍 admin）
 	mux.HandleFunc("POST /api/portal/service-cert/issue", requireRole("ops.admin", apiServiceCertIssue))
 	mux.HandleFunc("POST /api/portal/site-certificates/issue", requireRole("ops.admin", apiSiteCertificateIssue))
 	mux.HandleFunc("GET /api/portal/sites", requireRole("ops.viewer", apiPortalSites))
+	mux.HandleFunc("POST /api/portal/sites/unregister", requireRole("ops.admin", apiSitesUnregister))
 	// 被管网站自助注册（须出示 kind=site 证书，边缘 mTLS 照常强制）
 	mux.HandleFunc("POST /api/site/register", requireCert(apiSiteRegister))
 
@@ -255,6 +261,8 @@ func main() {
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+	// 原生注册站点的 ops 接口连通拨测（后台循环，结果进统一网站视图）。
+	startProbeLoop()
 	log.Printf("ops-portal backend listening on :%s", port)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)

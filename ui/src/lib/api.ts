@@ -82,6 +82,9 @@ export interface SiteOverview {
 	cert_serial?: string;
 	registered_at?: string;
 	source: 'agent' | 'native' | 'both';
+	/** portal 拨测 ops_url 的结果；undefined = 未注册 ops_url 或尚未探测 */
+	reachable?: boolean;
+	checked_at?: string;
 }
 
 export interface CertRecord {

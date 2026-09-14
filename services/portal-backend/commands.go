@@ -55,6 +55,28 @@ func saveCommands(s *commandStore) error {
 
 var validActions = map[string]bool{"start": true, "stop": true, "restart": true, "deploy": true}
 
+// 已终结（done/failed/expired）命令的保留条数上限，防 commands.json 无限增长。
+const maxTerminalCommands = 500
+
+// commandTTL 排队命令有效期：agent 长时间离线后上线不再执行过期命令。
+// 环境变量 COMMAND_TTL（默认 24h；非法值回退默认）。
+func commandTTL() time.Duration {
+	d, err := time.ParseDuration(getEnv("COMMAND_TTL", "24h"))
+	if err != nil || d <= 0 {
+		return 24 * time.Hour
+	}
+	return d
+}
+
+// commandExpiredAt 解析命令创建时间（容错：解析失败视为不过期）。
+func commandExpiredAt(createdAt string, now time.Time) bool {
+	ts, err := time.Parse(time.RFC3339, createdAt)
+	if err != nil {
+		return false
+	}
+	return now.Sub(ts) > commandTTL()
+}
+
 func enqueueCommand(cmd portalCommand) (*portalCommand, error) {
 	if !validActions[cmd.Action] {
 		return nil, errors.New("invalid action")
@@ -79,13 +101,31 @@ func enqueueCommand(cmd portalCommand) (*portalCommand, error) {
 	cmd.Status = "queued"
 	cmd.CreatedAt = time.Now().UTC().Format(time.RFC3339)
 	s.Commands = append(s.Commands, cmd)
+	pruneCommands(s)
 	if err := saveCommands(s); err != nil {
 		return nil, err
 	}
 	return &cmd, nil
 }
 
+// pruneCommands 裁剪终结命令：queued/acked 全留，done/failed/expired 只留最新 500 条。
+func pruneCommands(s *commandStore) {
+	var pending, terminal []portalCommand
+	for _, c := range s.Commands {
+		if c.Status == "queued" || c.Status == "acked" {
+			pending = append(pending, c)
+		} else {
+			terminal = append(terminal, c)
+		}
+	}
+	if len(terminal) > maxTerminalCommands {
+		terminal = terminal[len(terminal)-maxTerminalCommands:]
+	}
+	s.Commands = append(pending, terminal...)
+}
+
 // takeCommands 取走该 agent 的 queued 命令并标 acked（心跳时调用）。
+// 已过有效期的 queued 命令标 expired，不再下发。
 func takeCommands(agentID string) []portalCommand {
 	commandsMu.Lock()
 	defer commandsMu.Unlock()
@@ -93,10 +133,17 @@ func takeCommands(agentID string) []portalCommand {
 	if err != nil {
 		return nil
 	}
+	now := time.Now()
 	var out []portalCommand
 	changed := false
 	for i := range s.Commands {
 		if s.Commands[i].AgentID == agentID && s.Commands[i].Status == "queued" {
+			if commandExpiredAt(s.Commands[i].CreatedAt, now) {
+				s.Commands[i].Status = "expired"
+				s.Commands[i].Result = "expired: queued beyond TTL, not executed"
+				changed = true
+				continue
+			}
 			s.Commands[i].Status = "acked"
 			out = append(out, s.Commands[i])
 			changed = true

@@ -1,4 +1,6 @@
-# 服务器 agent（被管机侧）：上报 workwork/hotspot/ops-portal 三项目。
+# 服务器 agent（被管机侧）：上报 workwork/hotspot/ops-portal/travel。
+# workwork/hotspot/ops-portal 为 compose 项目（容器 + git + deploy）；
+# travel 为纯静态站，无 compose 项目，仅上报 git 版本（无容器、无 deploy）。
 # 独立 compose，与 portal 主文件分离，避免循环依赖。
 # 用法：AGENT_TOKEN=... docker compose -f agent-compose.yml up -d --build
 # 注意：站点目录同路径挂载（源 == 目标），deploy 解析才一致。
@@ -32,7 +34,7 @@ services:
       - AGENT_TOKEN=${AGENT_TOKEN:?AGENT_TOKEN required}
       - PORTAL_URL=http://portal-backend:8319
       - AGENT_COMPOSE_PROJECTS=workwork,hotspot,ops-portal
-      - AGENT_SITES=workwork:/home/workuser/workwork,hotspot:/home/workuser/hotspot,ops-portal:/home/workuser/ops-portal
+      - AGENT_SITES=workwork:/home/workuser/workwork,hotspot:/home/workuser/hotspot,ops-portal:/home/workuser/ops-portal,travel:/home/workuser/travel
       - AGENT_DEPLOY_DIRS=workwork:/home/workuser/workwork,hotspot:/home/workuser/hotspot,ops-portal:/home/workuser/ops-portal
       - HEARTBEAT_INTERVAL=10s
     volumes:
@@ -40,6 +42,10 @@ services:
       - /home/workuser/workwork:/home/workuser/workwork:ro
       - /home/workuser/hotspot:/home/workuser/hotspot:ro
       - /home/workuser/ops-portal:/home/workuser/ops-portal:ro
+      # travel 仅 git 上报（只读挂载源码即可，无 deploy 不需要写权限）。
+      # 前置：服务器 /home/workuser/travel 须已是 git checkout（先 clone 再 up，
+      # 否则 docker 会建出 root 空目录导致后续 checkout 权限问题）。
+      - /home/workuser/travel:/home/workuser/travel:ro
     networks:
       - ops-portal_portal_net
 

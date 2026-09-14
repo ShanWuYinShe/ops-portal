@@ -49,10 +49,14 @@ portal 以**网站**（而非机器或容器）组织被管对象。两条接入
 
 同一网站两条路都有时（`source: both`）两份信息合并展示；仅原生注册、
 尚无 agent 心跳的网站（`source: native`）如实显示「已注册接口、无运行实例」，
-不与机器数据混排。注册 ≠ 可达：portal 对 ops_url 的连通验证
-（service 证书探测 `/ops/v1/health`）待首个原生站点实际部署时落地。
+不与机器数据混排。注册 ≠ 可达：portal 后台每 `OPS_PROBE_INTERVAL`
+（默认 60s）以 service 证书拨测 `{ops_url}/ops/v1/health`，
+结果进统一网站视图的 `reachable`/`checked_at` 徽标（service 证书未签发时跳过）。
 
 ## 被管网站的 ops 管理接口（/ops/v1/*，原生实现模式）
+
+> 接口字段、鉴权与版本规则的唯一事实源是 `docs/ops-v1-spec.md`，
+> Go 参考包 `services/opshttp/`（标准库单文件，拷走即用）。本节只讲接入流程。
 
 网站原生实现统一被管接口时，在自己域名下暴露（建议 `<site>-ops.yinghuoren.com`，
 加入 OPS_DOMAINS 后同样全路径强制边缘 mTLS）：
@@ -60,12 +64,15 @@ portal 以**网站**（而非机器或容器）组织被管对象。两条接入
 - **放行规则**：仅接受出示 `service` 证书的调用方（校验透传的
   `X-Cert-Serial` 等于 portal service 证书 serial；其余一律 403）。
 - 端点（与 ops.agent.v1 同面，方向相反，由 portal 拉取）：
-  `GET /ops/v1/health`、`GET /ops/v1/status`（站点/容器/版本快照）。
+  `GET /ops/v1/health`、`GET /ops/v1/status`（站点/容器/版本快照，字段见 spec）。
 - 接入：portal 签发 `site` 注册证书 → 网站调 `POST /api/site/register`
-  登记自己的 ops 接口地址（注册进统一网站视图）→ portal 以 service 证书
-  调用验证连通（待首个原生站点落地时实现）。
+  登记自己的 ops 接口地址（注册进统一网站视图，`ops_url` 填服务根地址，
+  不要带 `/ops/v1` 后缀）→ portal 以 service 证书拨测验证连通，
+  「站点与服务」页 `reachable` 变绿后再宣布上线。
 - 域名须真实存在且接口已实现后再注册；注册的 ops_url 会在
   「站点与服务」页展示，死链/未实现接口的注册只会暴露问题而非隐藏问题。
+  下掉注册：portal「站点与服务」页注销（admin）或调
+  `POST /api/portal/sites/unregister`。
 
 ## 注册（enrollment，免人工复制 token）
 

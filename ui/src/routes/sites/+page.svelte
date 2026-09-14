@@ -4,6 +4,7 @@
 	import { askConfirm, toast } from '$lib/dialogs.svelte';
 
 	const canOperate = $derived(roleLevel(portal.whoami?.role) >= 2);
+	const isAdmin = $derived(roleLevel(portal.whoami?.role) >= 3);
 
 	const SOURCE_LABEL: Record<SiteOverview['source'], string> = {
 		agent: 'agent 上报',
@@ -35,6 +36,26 @@
 
 	function runningOf(site: SiteOverview): number {
 		return site.containers.filter((c) => c.state === 'running').length;
+	}
+
+	async function unregister(site: SiteOverview) {
+		if (
+			!(await askConfirm(
+				'注销原生注册',
+				`下掉 ${site.name} 的 ops 接口注册（${site.ops_url}）？\nagent 心跳不受影响，探测结果一并清除。`,
+				true
+			))
+		)
+			return;
+		try {
+			await api('/api/portal/sites/unregister', {
+				method: 'POST',
+				body: JSON.stringify({ name: site.name })
+			});
+			toast(`已注销 ${site.name} 的原生注册`);
+		} catch (e) {
+			toast('注销失败：' + (e as Error).message, 'err');
+		}
 	}
 </script>
 
@@ -79,6 +100,16 @@
 						<span class="font-mono text-xs text-ink-muted" title="原生注册的 ops 接口">
 							{site.ops_url}
 						</span>
+						{#if site.reachable === true}
+							<span class="badge bg-ok-soft text-ok" title="portal 拨测 {site.ops_url}/ops/v1/health 通过">可达</span>
+						{:else if site.reachable === false}
+							<span class="badge bg-err-soft text-err" title="portal 拨测失败，检查接口与放行清单">不可达</span>
+						{:else}
+							<span class="badge" title="尚未拨测（等 service 证书签发后的下一轮）">未探测</span>
+						{/if}
+						{#if isAdmin}
+							<button class="btn btn-sm btn-danger" onclick={() => unregister(site)}>注销注册</button>
+						{/if}
 					{/if}
 					{#each site.git as g (g.agent_id + g.name)}
 						<span class="text-xs text-ink-2">

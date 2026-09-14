@@ -80,6 +80,107 @@
 			toast('吊销失败：' + (e as Error).message, 'err');
 		}
 	}
+
+	// --- service 证书（portal 出访被管网站 ops 接口的客户端证书）---
+	let svcInfo = $state<{ serial: string; fingerprint: string; expires_at: string } | null>(null);
+
+	async function issueService() {
+		if (
+			!(await askConfirm(
+				'签发 service 证书',
+				'已有证书则直接复用（幂等）。新签发后所有被管网站放行清单需同步更新 serial，确认继续？',
+				false
+			))
+		)
+			return;
+		try {
+			const r = await api<{ serial: string; fingerprint: string; expires_at: string }>(
+				'/api/portal/service-cert/issue',
+				{ method: 'POST', body: '{}' }
+			);
+			svcInfo = r;
+			toast('service 证书就绪：把 serial 钉死到各被管网站放行清单');
+		} catch (e) {
+			toast('签发失败：' + (e as Error).message, 'err');
+		}
+	}
+
+	// --- site 注册证书（被管网站自助登记 ops_url 用）---
+	let siteName = $state('');
+	let siteBundle = $state<{ serial: string; client_cert: string; client_key: string } | null>(null);
+
+	async function issueSite() {
+		if (!siteName) {
+			toast('site_name 必填（与注册名/证书 label 一致）', 'err');
+			return;
+		}
+		try {
+			const r = await api<{ serial: string; client_cert: string; client_key: string }>(
+				'/api/portal/site-certificates/issue',
+				{ method: 'POST', body: JSON.stringify({ site_name: siteName }) }
+			);
+			siteBundle = r;
+			toast(`已为 ${siteName} 签发注册证书包，仅显示一次`, 'ok', 5200);
+			siteName = '';
+		} catch (e) {
+			toast('签发失败：' + (e as Error).message, 'err');
+		}
+	}
+
+	// --- 用户与证书绑定 ---
+	interface PortalUser {
+		username: string;
+		role: string;
+		cert_id: string;
+		cert_label: string;
+	}
+	let users = $state<PortalUser[]>([]);
+	let uform = $state({ username: '', role: 'ops.viewer', cert_id: '' });
+
+	async function loadUsers() {
+		try {
+			const r = await api<{ users: PortalUser[] }>('/api/portal/users');
+			users = r.users ?? [];
+		} catch {
+			/* 静默重试 */
+		}
+	}
+
+	$effect(() => {
+		if (isAdmin) loadUsers();
+	});
+
+	async function saveUser() {
+		if (!uform.username || !uform.cert_id) {
+			toast('用户名与绑定证书必填', 'err');
+			return;
+		}
+		try {
+			await api('/api/portal/users/upsert', {
+				method: 'POST',
+				body: JSON.stringify(uform)
+			});
+			toast(`已绑定 ${uform.username}`);
+			uform = { username: '', role: 'ops.viewer', cert_id: '' };
+			await Promise.all([loadUsers()]);
+		} catch (e) {
+			toast('保存失败：' + (e as Error).message, 'err');
+		}
+	}
+
+	async function removeUser(u: PortalUser) {
+		if (!(await askConfirm('删除用户', `删除 ${u.username} 的登录绑定？`, true))) return;
+		try {
+			await api('/api/portal/users/remove', {
+				method: 'POST',
+				body: JSON.stringify({ username: u.username })
+			});
+			toast('已删除');
+			await loadUsers();
+		} catch (e) {
+			toast('删除失败：' + (e as Error).message, 'err');
+		}
+	}
 </script>
 
 <div class="mb-4.5 flex items-center justify-between">
@@ -183,3 +284,93 @@
 		</tbody>
 	</table>
 </div>
+
+{#if isAdmin}
+	<div class="card mt-4.5">
+		<div class="card-head"><h2 class="text-base font-semibold">service 证书（portal 出访凭证）</h2></div>
+		<div class="card-body">
+			<div class="text-[13px] text-ink-2">
+				portal 主动调用被管网站 <code class="font-mono">/ops/v1/*</code>
+			 时出示；各被管网站放行清单钉死其 serial。幂等：已签发则直接复用。
+			</div>
+			<div class="mt-2.5">
+				<button class="btn btn-primary" onclick={issueService}>签发 / 查看 service 证书</button>
+			</div>
+			{#if svcInfo}
+				<div class="mt-3 font-mono text-[12.5px]">
+					<div>serial: <b>{svcInfo.serial}</b></div>
+					<div class="text-ink-2">fingerprint: {svcInfo.fingerprint}</div>
+					<div class="text-ink-2">有效期至: {svcInfo.expires_at}</div>
+				</div>
+			{/if}
+		</div>
+	</div>
+
+	<div class="card mt-4.5">
+		<div class="card-head"><h2 class="text-base font-semibold">site 注册证书（被管网站自助登记用）</h2></div>
+		<div class="card-body">
+			<div class="flex flex-wrap items-end gap-2.5">
+				<div class="field">
+					<label for="f-siteName">Site 名称</label>
+					<input id="f-siteName" class="input" placeholder="如 hotspot" bind:value={siteName} />
+				</div>
+				<button class="btn btn-primary" onclick={issueSite}>签发注册证书包</button>
+			</div>
+			{#if siteBundle}
+				<div class="mt-4 rounded-[7px] border border-[#f1d9a1] bg-warn-soft p-3">
+					<div class="mb-1.5 font-semibold">证书包仅显示一次（serial {siteBundle.serial.slice(0, 18)}…），请立即交付被管网站：</div>
+					<code class="block max-h-40 overflow-auto whitespace-pre-wrap break-all font-mono text-[12px]">{siteBundle.client_cert}{siteBundle.client_key}</code>
+				</div>
+			{/if}
+		</div>
+	</div>
+
+	<div class="card mt-4.5">
+		<div class="card-head"><h2 class="text-base font-semibold">用户与证书绑定</h2></div>
+		<table class="table">
+			<thead>
+				<tr><th>用户名</th><th>角色</th><th>绑定证书</th><th></th></tr>
+			</thead>
+			<tbody>
+				{#each users as u (u.username)}
+					<tr>
+						<td><b>{u.username}</b></td>
+						<td><span class="chip">{u.role}</span></td>
+						<td class="text-ink-2">{u.cert_label || u.cert_id}</td>
+						<td class="text-right">
+							<button class="btn btn-sm btn-danger" onclick={() => removeUser(u)}>删除</button>
+						</td>
+					</tr>
+				{:else}
+					<tr><td colspan="4"><div class="p-6 text-center text-[13px] text-ink-muted">暂无用户绑定（无绑定时持证用户默认 viewer）</div></td></tr>
+				{/each}
+			</tbody>
+		</table>
+		<div class="card-body">
+			<div class="flex flex-wrap items-end gap-2.5">
+				<div class="field">
+					<label for="f-uName">用户名</label>
+					<input id="f-uName" class="input" placeholder="如 liyou" bind:value={uform.username} />
+				</div>
+				<div class="field w-32 flex-none">
+					<label for="f-uRole">角色</label>
+					<select id="f-uRole" class="input" bind:value={uform.role}>
+						<option value="ops.viewer">ops.viewer</option>
+						<option value="ops.operator">ops.operator</option>
+						<option value="ops.admin">ops.admin</option>
+					</select>
+				</div>
+				<div class="field flex-[2]">
+					<label for="f-uCert">绑定证书</label>
+					<select id="f-uCert" class="input" bind:value={uform.cert_id}>
+						<option value="">选择</option>
+						{#each certs.filter((c) => c.status === 'active') as c (c.id)}
+							<option value={c.id}>{c.label}（{c.kind}）</option>
+						{/each}
+					</select>
+				</div>
+				<button class="btn btn-primary" onclick={saveUser}>保存绑定</button>
+			</div>
+		</div>
+	</div>
+{/if}

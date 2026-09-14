@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"os"
 	"sort"
@@ -36,6 +37,7 @@ func apiServiceCertIssue(w http.ResponseWriter, r *http.Request) {
 
 	if existing := findServiceCert(); existing != nil {
 		pemOut, _ := os.ReadFile(servicePemPath())
+		ensureServiceKeyPEM()
 		writeOK(w, map[string]any{
 			"cert_id": existing.ID, "serial": existing.Serial,
 			"fingerprint": existing.Fingerprint, "expires_at": existing.ExpiresAt,
@@ -70,6 +72,8 @@ func apiServiceCertIssue(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, err)
 		return
 	}
+	// 私钥独立 PEM 落盘：portal 主动拨测被管网站 ops 接口时作 mTLS 客户端证书。
+	_ = os.WriteFile(serviceKeyPath(), keyPEM, 0600)
 	_ = os.WriteFile(servicePemPath(), certPEM, 0600)
 	audit(u.Username, serial, "service_cert.issue", c.ID, "ok", "被管网站放行清单用", r.RemoteAddr)
 	writeOK(w, map[string]any{
@@ -86,6 +90,32 @@ func findServiceCert() *certRecord {
 		}
 	}
 	return nil
+}
+
+// ensureServiceKeyPEM 自愈：老版本只写了 .__raw 包与证书 PEM，
+// 探测需要独立私钥 PEM 时从包里拆出来补写。
+func ensureServiceKeyPEM() {
+	if _, err := os.Stat(serviceKeyPath()); err == nil {
+		return
+	}
+	raw, err := os.ReadFile(serviceKeyPath() + ".__raw")
+	if err != nil {
+		return
+	}
+	var bundle struct {
+		Key  string `json:"key"`
+		Cert string `json:"cert"`
+	}
+	if err := json.Unmarshal(raw, &bundle); err != nil {
+		return
+	}
+	if bundle.Key == "" {
+		return
+	}
+	_ = os.WriteFile(serviceKeyPath(), []byte(bundle.Key), 0600)
+	if _, err := os.Stat(servicePemPath()); err != nil && bundle.Cert != "" {
+		_ = os.WriteFile(servicePemPath(), []byte(bundle.Cert), 0600)
+	}
 }
 
 // ── site 注册证书 + 站点注册表 ──
@@ -219,6 +249,57 @@ func apiSiteRegister(w http.ResponseWriter, r *http.Request) {
 	writeOK(w, map[string]any{"site": name, "registered": true})
 }
 
+// POST /api/portal/sites/unregister（admin）—— 下掉原生注册。
+// 只删注册表条目，不影响 agent 心跳视图；该站点的探测结果一并清除。
+func apiSitesUnregister(w http.ResponseWriter, r *http.Request) {
+	if !mustMethod(w, r, http.MethodPost) {
+		return
+	}
+	var body struct {
+		Name string `json:"name"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	name := strings.TrimSpace(body.Name)
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "name required")
+		return
+	}
+	u := actorOf(r)
+	sitesMu.Lock()
+	s, err := loadSites()
+	if err != nil {
+		sitesMu.Unlock()
+		writeInternalError(w, err)
+		return
+	}
+	kept := s.Sites[:0]
+	found := false
+	for _, e := range s.Sites {
+		if e.Name == name {
+			found = true
+			continue
+		}
+		kept = append(kept, e)
+	}
+	if !found {
+		sitesMu.Unlock()
+		writeError(w, http.StatusNotFound, "site not registered")
+		return
+	}
+	s.Sites = kept
+	err = saveSites(s)
+	sitesMu.Unlock()
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	clearProbe(name)
+	audit(u.Username, "", "site.unregister", name, "ok", "", r.RemoteAddr)
+	writeOK(w, map[string]any{"site": name, "unregistered": true})
+}
+
 // ── 统一网站视图（「网站」是 portal 的一等实体）──
 //
 // 两条接入路径汇入同一视图，不复制数据：
@@ -254,6 +335,10 @@ type siteView struct {
 	RegisteredAt string `json:"registered_at,omitempty"`
 	// Source: agent（心跳发现）/ native（仅注册表）/ both。
 	Source string `json:"source"`
+	// Reachable: portal 以 service 证书拨测 ops_url 的结果；
+	// nil = 未注册 ops_url 或尚未探测（见 probe.go）。
+	Reachable *bool  `json:"reachable,omitempty"`
+	CheckedAt string `json:"checked_at,omitempty"`
 }
 
 func agentOnlineAt(t time.Time) bool { return time.Since(t) < time.Minute }
@@ -326,6 +411,13 @@ func buildSiteViews() ([]siteView, error) {
 	for _, v := range views {
 		if v.Agents == nil {
 			v.Agents = []siteAgentRef{}
+		}
+		if v.OpsURL != "" {
+			if res, ok := getProbe(v.Name); ok {
+				r := res.Reachable
+				v.Reachable = &r
+				v.CheckedAt = res.CheckedAt.UTC().Format(time.RFC3339)
+			}
 		}
 		sort.Slice(v.Containers, func(i, j int) bool {
 			return v.Containers[i].Service < v.Containers[j].Service
