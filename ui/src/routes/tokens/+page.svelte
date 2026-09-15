@@ -187,19 +187,24 @@
 
 <div class="mb-4.5">
 	<h1 class="page-title">机器凭据</h1>
-	<div class="page-sub">portal-agent 令牌与证书包 · service / site 证书 · portal 只存摘要</div>
+	<div class="page-sub">
+		管理「被管机器怎么连回管理站」：新机器接入用注册令牌，站间互信用 service / site 证书。
+		人用的登录证书在「用户与设备」页。
+	</div>
 </div>
 
 <div class="card">
-	<div class="card-head"><h2 class="text-base font-semibold">一次性注册令牌（推荐）</h2></div>
+	<div class="card-head"><h2 class="text-base font-semibold">新机器接入 · 一次性注册令牌（推荐）</h2></div>
 	<div class="card-body">
 		<div class="text-[13px] text-ink-2">
-			被管机凭此令牌自助兑换正式 token（30 分钟有效、单次使用），配合
-			<code class="font-mono">scripts/onboard-portal-agent.sh</code> 一键接入，长效 token 永不经人工手。
+			给一台新的被管机器接入用：在机器上跑
+			<code class="font-mono">scripts/onboard-portal-agent.sh</code>
+			时填入这个令牌，机器会自动换取自己的长期凭证（令牌 30 分钟有效、只能用一次，
+			长期凭证由机器自己保管，不经人手）。
 		</div>
 		<div class="mt-2.5 flex flex-wrap items-end gap-2.5">
 			<div class="field">
-				<label for="f-enrollAgent">Agent ID</label>
+				<label for="f-enrollAgent">机器 ID（portal_agent_id）</label>
 				<input id="f-enrollAgent" class="input" placeholder="如 agent-hotspot-01" bind:value={enrollAgentID}
 					onkeydown={(e) => e.key === 'Enter' && issueEnroll()} />
 			</div>
@@ -215,11 +220,14 @@
 </div>
 
 <div class="card mt-4.5">
-	<div class="card-head"><h2 class="text-base font-semibold">直接签发长效 token（不推荐）</h2></div>
+	<div class="card-head"><h2 class="text-base font-semibold">直接签发长期 token（不推荐）</h2></div>
 	<div class="card-body">
+		<div class="text-[13px] text-ink-2 mb-2.5">
+			跳过注册流程，直接发一枚长期 token 给机器。仅调试或特殊场景使用，日常接入请用上面的注册令牌。
+		</div>
 		<div class="flex flex-wrap items-end gap-2.5">
 			<div class="field">
-				<label for="f-agentID">Agent ID</label>
+				<label for="f-agentID">机器 ID（portal_agent_id）</label>
 				<input id="f-agentID" class="input" placeholder="如 agent-hotspot-01" bind:value={agentID}
 					onkeydown={(e) => e.key === 'Enter' && issue()} />
 			</div>
@@ -232,17 +240,18 @@
 </div>
 
 <div class="card mt-4.5">
-	<div class="card-head"><h2 class="text-base font-semibold">机器证书包（补发/调试用）</h2></div>
+	<div class="card-head"><h2 class="text-base font-semibold">机器证书包（补发 / 调试用）</h2></div>
 	<div class="card-body">
 		<div class="text-[13px] text-ink-2">
-			一次发放机器证书 + 正式 token（需服务器配好 CF_API_TOKEN）。日常接入请用上面的注册令牌流程。
+			把「机器证书 + 长期 token」打包一次性发给机器，适合跑不了注册脚本的场合
+			（需要服务器配好 CF_API_TOKEN）。日常接入请用上面的注册令牌流程。
 		</div>
 		<div class="mt-2.5 flex flex-wrap items-end gap-2.5">
 			<div class="field">
-				<label for="f-bundleAgent">Agent ID</label>
+				<label for="f-bundleAgent">机器 ID（portal_agent_id）</label>
 				<input id="f-bundleAgent" class="input" placeholder="如 agent-hotspot-01" bind:value={bundleAgentID} />
 			</div>
-			<button class="btn btn-primary" onclick={issueBundle}>签发证书包</button>
+			<button class="btn btn-primary" onclick={issueBundle}>签发机器证书包</button>
 		</div>
 		{#if bundle}
 			<SecretReveal
@@ -254,14 +263,18 @@
 </div>
 
 <div class="card mt-4.5">
-	<div class="card-head"><h2 class="text-base font-semibold">service 证书（portal 出访凭证）</h2></div>
+	<div class="card-head">
+		<h2 class="text-base font-semibold">service 证书（管理站访问各网站时出示）</h2>
+		<span class="text-xs text-ink-muted">签发一次即可，重复点击不会重复签发</span>
+	</div>
 	<div class="card-body">
 		<div class="text-[13px] text-ink-2">
-			portal 主动调用被管网站 <code class="font-mono">/ops/v1/*</code>
-		 时出示；各被管网站放行清单钉死其 serial。幂等：已签发则直接复用。
+			管理站主动询问某网站健康状态（<code class="font-mono">/ops/v1/health</code>）时，
+			出示这张证书表明「我是管理站」；各网站只放行下面这个 serial。
+			点击按钮签发或查看当前证书信息。
 		</div>
 		<div class="mt-2.5">
-			<button class="btn btn-primary" onclick={issueService}>签发 / 查看 service 证书</button>
+			<button class="btn btn-primary" onclick={issueService}>签发或查看 service 证书</button>
 		</div>
 		{#if svcInfo}
 			<div class="mt-3 font-mono text-[12.5px]">
@@ -274,14 +287,17 @@
 </div>
 
 <div class="card mt-4.5">
-	<div class="card-head"><h2 class="text-base font-semibold">site 注册证书（被管网站自助登记用）</h2></div>
+	<div class="card-head">
+		<h2 class="text-base font-semibold">site 证书（发给被管网站，用于登记自己的健康接口）</h2>
+		<span class="text-xs text-ink-muted">签发后把证书交给该网站保管</span>
+	</div>
 	<div class="card-body">
 		<div class="flex flex-wrap items-end gap-2.5">
 			<div class="field">
-				<label for="f-siteName">Site 名称</label>
+				<label for="f-siteName">网站名（与站点注册名一致）</label>
 				<input id="f-siteName" class="input" placeholder="如 hotspot" bind:value={siteName} />
 			</div>
-			<button class="btn btn-primary" onclick={issueSite}>签发注册证书包</button>
+			<button class="btn btn-primary" onclick={issueSite}>签发 site 证书</button>
 		</div>
 		{#if siteBundle}
 			<SecretReveal
@@ -293,16 +309,20 @@
 </div>
 
 <div class="card mt-4.5">
+	<div class="card-head">
+		<h2 class="text-base font-semibold">令牌签发记录</h2>
+		<span class="text-xs text-ink-muted">所有发出去的接入令牌；长期不再用的记得吊销</span>
+	</div>
 	<table class="table">
 		<thead>
-			<tr><th>ID</th><th>Agent</th><th>类型</th><th>签发人</th><th>签发时间</th><th>状态</th><th></th></tr>
+			<tr><th>ID</th><th>机器</th><th>令牌类型</th><th>签发人</th><th>签发时间</th><th>状态</th><th></th></tr>
 		</thead>
 		<tbody>
 			{#each tokens as t (t.id)}
 				<tr>
 					<td class="font-mono">{t.id}</td>
 					<td><b>{t.portal_agent_id}</b></td>
-					<td><span class="chip">{t.kind === 'enroll' ? '一次性注册' : '正式'}</span></td>
+					<td><span class="chip">{t.kind === 'enroll' ? '一次性注册' : '长期'}</span></td>
 					<td class="text-ink-2">{t.created_by}</td>
 					<td class="font-mono text-ink-2">{shortTime(t.created_at)}</td>
 					<td>

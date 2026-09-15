@@ -23,6 +23,9 @@
 	});
 
 	const isAdmin = $derived(roleLevel(portal.whoami?.role) >= 3);
+	// 角色的展示名：角色值本身是机器格式（ops.*），界面配中文权限说明
+	const roleLabel = (role: string) =>
+		({ 'ops.viewer': 'ops.viewer · 只读', 'ops.operator': 'ops.operator · 可操作', 'ops.admin': 'ops.admin · 管理员' })[role] ?? role;
 	const soonExpiring = $derived(
 		certs.filter((c) => {
 			if (c.status !== 'active' || !c.expires_at) return false;
@@ -163,43 +166,47 @@
 <div class="mb-4.5 flex items-center justify-between">
 	<div>
 		<h1 class="page-title">用户与设备</h1>
-		<div class="page-sub">设备证书登记表与登录绑定 · 门禁以本表为准 · 机器凭据见「机器凭据」页</div>
+		<div class="page-sub">管理「谁能访问管理站」：每台设备一张客户端证书，用户名绑定证书后即以该身份登录</div>
 	</div>
 	{#if isAdmin}
 		<button class="btn btn-primary" onclick={() => (showForm = !showForm)}>
-			{showForm ? '收起' : '登记证书'}
+			{showForm ? '收起' : '登记设备证书'}
 		</button>
 	{/if}
 </div>
 
 {#if showForm}
 	<div class="card mb-4.5">
-		<div class="card-head"><h2 class="text-base font-semibold">登记新证书</h2></div>
+		<div class="card-head"><h2 class="text-base font-semibold">登记新设备证书</h2></div>
 		<div class="card-body">
-			<div class="flex flex-wrap items-end gap-2.5">
+			<div class="text-[13px] text-ink-2">
+				流程：在 Cloudflare 给新设备签发一张客户端证书并装入设备 → 把 CF 返回的
+				Serial 等信息登记到下面，门禁即放行该设备。带 * 为必填。
+			</div>
+			<div class="mt-2.5 flex flex-wrap items-end gap-2.5">
 				<div class="field">
-					<label>Label（持有人-设备）*</label>
+					<label>名称（持有人-设备）*</label>
 					<input class="input" placeholder="liyou-iphone" bind:value={form.label} />
 				</div>
-				<div class="field w-28 flex-none">
-					<label>类型</label>
+				<div class="field w-40 flex-none">
+					<label>用途</label>
 					<select class="input" bind:value={form.kind}>
-						<option value="human">human</option>
-						<option value="portal-agent">portal-agent</option>
+						<option value="human">人用（登录管理站）</option>
+						<option value="portal-agent">机器用（portal-agent）</option>
 					</select>
 				</div>
 				<div class="field">
-					<label>Serial Number *</label>
-					<input class="input" placeholder="CF 返回的 serial_number" bind:value={form.serial} />
+					<label>证书序列号 Serial *</label>
+					<input class="input" placeholder="CF 建证返回的 serial_number" bind:value={form.serial} />
 				</div>
 			</div>
 			<div class="mt-2.5 flex flex-wrap items-end gap-2.5">
 				<div class="field">
-					<label>CF 证书 ID</label>
+					<label>CF 证书 ID（选填）</label>
 					<input class="input" bind:value={form.cf_id} />
 				</div>
 				<div class="field flex-[2]">
-					<label>SHA-256 指纹</label>
+					<label>SHA-256 指纹（选填）</label>
 					<input class="input" bind:value={form.fingerprint} />
 				</div>
 				<div class="field">
@@ -209,7 +216,7 @@
 			</div>
 			<div class="mt-2.5 flex flex-wrap items-end gap-2.5">
 				<div class="field">
-					<label>Common Name</label>
+					<label>Common Name（选填）</label>
 					<input class="input" bind:value={form.common_name} />
 				</div>
 				<div class="field flex-[2]">
@@ -231,9 +238,13 @@
 {/if}
 
 <div class="card">
+	<div class="card-head">
+		<h2 class="text-base font-semibold">设备证书（登录门禁名册）</h2>
+		<span class="text-xs text-ink-muted">在此名单内的设备才能打开管理站；吊销即拒绝访问</span>
+	</div>
 	<table class="table">
 		<thead>
-			<tr><th>Label</th><th>类型</th><th>Serial</th><th>状态</th><th>有效期至</th><th>登记时间</th><th></th></tr>
+			<tr><th>名称</th><th>用途</th><th>序列号 Serial</th><th>状态</th><th>有效期至</th><th>登记时间</th><th></th></tr>
 		</thead>
 		<tbody>
 				{#each certs as c (c.id)}
@@ -266,7 +277,7 @@
 								{#if c.note}<div class="text-xs text-ink-muted">{c.note}</div>{/if}
 							{/if}
 						</td>
-					<td><span class="chip">{c.kind}</span></td>
+					<td><span class="chip">{c.kind === 'human' ? '人用' : '机器用'}</span></td>
 					<td class="font-mono text-ink-2" title={c.fingerprint}>{c.serial.slice(0, 18)}…</td>
 					<td>
 						<span class="badge {badgeCls(c.status === 'active' ? 'ok' : '')}">{c.status}</span>
@@ -288,23 +299,26 @@
 
 {#if isAdmin}
 	<div class="card mt-4.5">
-		<div class="card-head"><h2 class="text-base font-semibold">用户与证书绑定</h2></div>
+		<div class="card-head">
+			<h2 class="text-base font-semibold">用户与角色绑定</h2>
+			<span class="text-xs text-ink-muted">把用户名绑到一张设备证书：持该证书访问，即以此用户身份和角色登录</span>
+		</div>
 		<table class="table">
 			<thead>
-				<tr><th>用户名</th><th>角色</th><th>绑定证书</th><th></th></tr>
+				<tr><th>用户名</th><th>角色（权限）</th><th>绑定的设备证书</th><th></th></tr>
 			</thead>
 			<tbody>
 				{#each users as u (u.username)}
 					<tr>
 						<td><b>{u.username}</b></td>
-						<td><span class="chip">{u.role}</span></td>
+						<td><span class="chip">{roleLabel(u.role)}</span></td>
 						<td class="text-ink-2">{u.cert_label || u.cert_id}</td>
 						<td class="text-right">
 							<button class="btn btn-sm btn-danger" onclick={() => removeUser(u)}>删除</button>
 						</td>
 					</tr>
 				{:else}
-					<tr><td colspan="4"><div class="p-6 text-center text-[13px] text-ink-muted">暂无用户绑定（无绑定时持证用户默认 viewer）</div></td></tr>
+					<tr><td colspan="4"><div class="p-6 text-center text-[13px] text-ink-muted">暂无绑定；未绑定时持证访问按只读（viewer）处理</div></td></tr>
 				{/each}
 			</tbody>
 		</table>
@@ -314,20 +328,20 @@
 					<label for="f-uName">用户名</label>
 					<input id="f-uName" class="input" placeholder="如 liyou" bind:value={uform.username} />
 				</div>
-				<div class="field w-32 flex-none">
-					<label for="f-uRole">角色</label>
+				<div class="field w-52 flex-none">
+					<label for="f-uRole">角色（权限）</label>
 					<select id="f-uRole" class="input" bind:value={uform.role}>
-						<option value="ops.viewer">ops.viewer</option>
-						<option value="ops.operator">ops.operator</option>
-						<option value="ops.admin">ops.admin</option>
+						<option value="ops.viewer">ops.viewer · 只读查看</option>
+						<option value="ops.operator">ops.operator · 可操作站点</option>
+						<option value="ops.admin">ops.admin · 管理员</option>
 					</select>
 				</div>
 				<div class="field flex-[2]">
-					<label for="f-uCert">绑定证书</label>
+					<label for="f-uCert">绑定的设备证书</label>
 					<select id="f-uCert" class="input" bind:value={uform.cert_id}>
 						<option value="">选择</option>
 						{#each certs.filter((c) => c.status === 'active') as c (c.id)}
-							<option value={c.id}>{c.label}（{c.kind}）</option>
+							<option value={c.id}>{c.label}（{c.kind === 'human' ? '人用' : '机器用'}）</option>
 						{/each}
 					</select>
 				</div>

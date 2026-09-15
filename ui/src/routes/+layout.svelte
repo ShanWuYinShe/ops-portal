@@ -1,5 +1,6 @@
 <script lang="ts">
 	import '../app.css';
+	import { page } from '$app/state';
 	import {
 		LayoutDashboard,
 		Server,
@@ -25,11 +26,6 @@
 		{ href: '/tokens', label: '机器凭据', icon: KeyRound, adminOnly: true },
 		{ href: '/audit', label: '审计日志', icon: History, adminOnly: true }
 	];
-
-	let path = $state('');
-	$effect(() => {
-		path = location.pathname;
-	});
 
 	$effect(() => {
 		loadPortal();
@@ -79,7 +75,7 @@
 						<a
 							href={item.href}
 							class="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] hover:bg-sidebar-active hover:text-white
-								{path === item.href ? 'bg-primary font-medium text-white' : ''}"
+								{page.url.pathname === item.href ? 'bg-primary font-medium text-white' : ''}"
 						>
 							<item.icon class="h-4 w-4 flex-none" />
 							{item.label}
