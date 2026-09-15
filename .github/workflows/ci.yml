@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Portal Backend (Go)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.5'
+          cache: true
+          cache-dependency-path: services/portal-backend/go.sum
+
+      - name: gofmt
+        run: test -z "$(gofmt -l services/portal-backend/)"
+      - name: go vet
+        run: go vet ./...
+        working-directory: services/portal-backend
+      - name: go build
+        run: go build -o /dev/null .
+        working-directory: services/portal-backend
+      - name: go test
+        run: go test -count=1 ./...
+        working-directory: services/portal-backend
+
+  agent:
+    name: Portal Agent (Go)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.5'
+          cache: true
+          cache-dependency-path: services/portal-agent/go.sum
+
+      - name: gofmt
+        run: test -z "$(gofmt -l services/portal-agent/)"
+      - name: go vet
+        run: go vet ./...
+        working-directory: services/portal-agent
+      - name: go build
+        run: go build -o /dev/null .
+        working-directory: services/portal-agent
+      - name: go test
+        run: go test -count=1 ./...
+        working-directory: services/portal-agent
+
+  ui:
+    name: Portal UI (SvelteKit)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.14'
+
+      - name: bun install
+        run: bun install --cwd ui --frozen-lockfile
+      - name: type-check (svelte-check)
+        run: bun run --cwd ui check
+      - name: build
+        run: bun run --cwd ui build

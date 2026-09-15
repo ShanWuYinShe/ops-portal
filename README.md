@@ -25,14 +25,15 @@ docker compose --profile dev up -d --build
 - 上报：`https://localhost:8443/api/portal/agents`（agent-local 每 5s 心跳一次）
 
 生产部署：`ORIGIN_PULL_VERIFY=on` + 按 `docs/cf-edge.md` 配边缘规则。
+统一走部署脚本（版本注入＋构建＋健康校验＋回滚提示）：
 
 ```bash
-UI_VERSION=$(git rev-parse --short HEAD) \
-  docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+./scripts/deploy.sh                # 本地/默认栈
+DEPLOY_ENV=prod ./scripts/deploy.sh  # 生产（叠加 docker-compose.prod.yml）
 ```
 
-`UI_VERSION` 注入前端构建标识（显示在侧栏底部 `build <sha>`），用于核对线上
-实际运行的版本；未设置时显示 `dev`。
+`UI_VERSION`/`IMAGE_TAG` 均由脚本按当前 git 自动注入；`UI_VERSION` 显示在
+侧栏底部 `build <sha>`，用于核对线上实际运行的版本；回滚见脚本输出。
 
 ## 目录
 

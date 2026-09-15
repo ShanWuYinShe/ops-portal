@@ -7,6 +7,7 @@
 
 services:
   portal-agent:
+    image: ops-portal-agent:${IMAGE_TAG:-latest}
     build:
       context: ./services/portal-agent
       dockerfile: Dockerfile

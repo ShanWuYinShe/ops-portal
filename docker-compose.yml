@@ -9,6 +9,9 @@ name: ops-portal
 
 services:
   portal-backend:
+    # 不可变版本 tag：scripts/deploy.sh 导出 IMAGE_TAG 后构建，
+    # 回滚 = IMAGE_TAG=<旧tag> up -d（默认 latest 保持本地习惯）。
+    image: ops-portal-backend:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: ./services/portal-backend/Dockerfile
@@ -56,6 +59,7 @@ services:
       start_period: 10s
 
   portal-nginx:
+    image: ops-portal-nginx:${IMAGE_TAG:-latest}
     build:
       context: ./services/portal-nginx
       dockerfile: Dockerfile
@@ -101,6 +105,7 @@ services:
   # 生产被管机各自独立部署 agent，不在本文件里声明。
   agent-local:
     profiles: ["dev"]
+    image: ops-portal-agent:${IMAGE_TAG:-latest}
     build:
       context: ./services/portal-agent
       dockerfile: Dockerfile
