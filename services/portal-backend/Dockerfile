@@ -4,6 +4,10 @@ ARG ALPINE_VERSION=3.24.1
 
 FROM oven/bun:${BUN_VERSION}-alpine AS ui-builder
 
+# 前端版本标识（git SHA），由 compose 从部署环境注入；显示在侧栏底部
+ARG UI_VERSION=dev
+ENV UI_VERSION=${UI_VERSION}
+
 WORKDIR /ui
 COPY ui/package.json ui/bun.lock ./
 RUN bun install --frozen-lockfile

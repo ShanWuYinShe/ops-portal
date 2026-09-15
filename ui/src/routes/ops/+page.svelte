@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { api, type PortalCommand, type SiteOverview } from '$lib/api';
 	import { badgeCls, badgeOf, portal, roleLevel, shortTime } from '$lib/state.svelte';
 	import { poll } from '$lib/poll';
@@ -56,8 +57,15 @@
 	});
 
 	// 切换网站/机器后勾选失效的清理。
+	// 只随 deployServiceOptions 变化触发；deployTargets 须 untrack 读——
+	// effect 内读写同一状态时 filter 恒返回新引用，会无限自触发，
+	// 拖死调度队列导致本组件（乃至全站）响应冻结（whoami 已加载仍显示只读）。
 	$effect(() => {
-		deployTargets = deployTargets.filter((s) => deployServiceOptions.includes(s));
+		const options = deployServiceOptions;
+		untrack(() => {
+			const pruned = deployTargets.filter((s) => options.includes(s));
+			if (pruned.length !== deployTargets.length) deployTargets = pruned;
+		});
 	});
 
 	function labelOf(site: SiteOverview): string {

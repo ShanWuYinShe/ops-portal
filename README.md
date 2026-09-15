@@ -26,6 +26,14 @@ docker compose --profile dev up -d --build
 
 生产部署：`ORIGIN_PULL_VERIFY=on` + 按 `docs/cf-edge.md` 配边缘规则。
 
+```bash
+UI_VERSION=$(git rev-parse --short HEAD) \
+  docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+```
+
+`UI_VERSION` 注入前端构建标识（显示在侧栏底部 `build <sha>`），用于核对线上
+实际运行的版本；未设置时显示 `dev`。
+
 ## 目录
 
 | 路径 | 说明 |

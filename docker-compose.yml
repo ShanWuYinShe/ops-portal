@@ -16,6 +16,8 @@ services:
         BUN_VERSION: ${BUN_VERSION:-1.3.14}
         GO_VERSION: ${GO_VERSION:-1.26.5}
         ALPINE_VERSION: ${ALPINE_VERSION:-3.24.1}
+        # 前端构建标识：部署时 `UI_VERSION=$(git rev-parse --short HEAD)` 注入
+        UI_VERSION: ${UI_VERSION:-dev}
     restart: unless-stopped
     init: true
     user: "1001:1001"

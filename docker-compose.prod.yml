@@ -1,5 +1,6 @@
 # 生产部署（服务器）：ipvlan 公网 IPv6 + Origin Pulls 强制。
-# 用法：docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+# 用法：UI_VERSION=$(git rev-parse --short HEAD) docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+# （UI_VERSION 注入前端构建标识，显示在侧栏底部，用于核对线上版本）
 # 前置：.env 配好（见 .env.prod.example），cert/ 放 Origin CA 源站证书。
 
 services:

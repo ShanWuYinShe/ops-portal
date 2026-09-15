@@ -88,6 +88,8 @@
 				{/if}
 			{/each}
 		</nav>
+		<!-- 构建版本标识：部署时注入 git SHA，用于核对线上实际运行的构建 -->
+		<div class="px-4.5 pb-2.5 text-[10.5px] text-slate-600 select-all max-md:hidden">build {__APP_VERSION__}</div>
 		{#if portal.whoami}
 			<div class="m-3 rounded-[10px] bg-sidebar-active p-3 max-md:hidden">
 				<b class="block text-[13px] text-white">{portal.whoami.username}</b>
