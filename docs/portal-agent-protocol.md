@@ -36,6 +36,11 @@
 human 与 service/site/portal-agent 物理同源（CF 托管 CA）但 kind 隔离、权限面互斥：
 管理面只认 human，机器树只认 portal-agent，注册树只认 site，被管网站只认 service。
 
+证书登记表里的 `label` 是**显示名**（认证按 serial/指纹查表，与 label 无关），
+可随时在「用户与设备」页改名（`POST /api/portal/certs/rename`，admin，记审计）。
+唯一例外：**portal-agent 证书的 label 即 portal_agent_id**，是机器双因子
+「证书在表且 label==上报身份」的绑定键，数据层拒绝改名。
+
 ## 统一网站视图（「网站」是一等实体）
 
 portal 以**网站**（而非机器或容器）组织被管对象。两条接入路径汇入同一视图

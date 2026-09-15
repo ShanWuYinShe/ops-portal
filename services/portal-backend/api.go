@@ -89,6 +89,52 @@ func apiCertsRevoke(w http.ResponseWriter, r *http.Request) {
 	writeOK(w, map[string]any{"cert": c, "cf_sync_required": true})
 }
 
+// POST /api/portal/certs/rename（admin）—— 改证书显示名（label）。
+// 认证按 serial/指纹查表，改名不影响门禁；仅用于提升可读性。
+// 约束：portal-agent 证书不可改——label 即 portal_agent_id，是机器双因子
+// 「证书在表且 label==上报身份」的绑定键，改名会断开身份校验。
+func apiCertsRename(w http.ResponseWriter, r *http.Request) {
+	if !mustMethod(w, r, http.MethodPost) {
+		return
+	}
+	var body struct {
+		ID    string `json:"id"`
+		Label string `json:"label"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	label := strings.TrimSpace(body.Label)
+	if label == "" || len(label) > 64 {
+		writeError(w, http.StatusBadRequest, "label 必填且不超过 64 字符")
+		return
+	}
+	db, err := getDB()
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	old, err := scanCert(db.QueryRow(`SELECT `+certColumns+` FROM certs WHERE id=?`, body.ID))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	if old.Kind == "portal-agent" {
+		writeError(w, http.StatusBadRequest,
+			"portal-agent 证书的 label 即 portal_agent_id（机器身份绑定键），不可改名")
+		return
+	}
+	u := actorOf(r)
+	c, err := renameCert(body.ID, label)
+	if err != nil {
+		audit(u.Username, old.Serial, "certs.rename", body.ID, "fail", err.Error(), r.RemoteAddr)
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	audit(u.Username, old.Serial, "certs.rename", c.ID, "ok", old.Label+" → "+c.Label, r.RemoteAddr)
+	writeOK(w, map[string]any{"cert": c})
+}
+
 // --- agent token ---
 
 func apiAgentTokens(w http.ResponseWriter, r *http.Request) {

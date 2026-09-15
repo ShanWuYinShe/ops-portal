@@ -213,6 +213,7 @@ func main() {
 	mux.HandleFunc("GET /api/portal/certs", requireRole("ops.viewer", apiCertsList))
 	mux.HandleFunc("POST /api/portal/certs/register", requireRole("ops.admin", apiCertsAdd))
 	mux.HandleFunc("POST /api/portal/certs/revoke", requireRole("ops.admin", apiCertsRevoke))
+	mux.HandleFunc("POST /api/portal/certs/rename", requireRole("ops.admin", apiCertsRename))
 
 	// agent token（admin）+ 一次性注册令牌（admin 签发，被管机自助兑换）
 	mux.HandleFunc("GET /api/portal/agent-tokens", requireRole("ops.admin", apiAgentTokens))

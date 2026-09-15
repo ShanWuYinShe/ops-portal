@@ -144,3 +144,24 @@ func certIDExists(id string) bool {
 	}
 	return n > 0
 }
+
+// renameCert 改显示名（label）。认证按 serial/指纹查表不受影响。
+// portal-agent 证书在数据层直接拒绝：label 即 portal_agent_id，是机器
+// 双因子「证书在表且 label==上报身份」的绑定键，改名会断开身份校验。
+func renameCert(id, label string) (*certRecord, error) {
+	db, err := getDB()
+	if err != nil {
+		return nil, err
+	}
+	old, err := scanCert(db.QueryRow(`SELECT `+certColumns+` FROM certs WHERE id=?`, id))
+	if err != nil {
+		return nil, errors.New("not found")
+	}
+	if old.Kind == "portal-agent" {
+		return nil, errors.New("portal-agent 证书的 label 即 portal_agent_id（机器身份绑定键），不可改名")
+	}
+	if _, err := db.Exec(`UPDATE certs SET label=? WHERE id=?`, label, id); err != nil {
+		return nil, err
+	}
+	return scanCert(db.QueryRow(`SELECT `+certColumns+` FROM certs WHERE id=?`, id))
+}

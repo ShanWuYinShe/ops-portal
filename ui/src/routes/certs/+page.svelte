@@ -9,6 +9,8 @@
 
 	let certs = $state<CertRecord[]>([]);
 	let showForm = $state(false);
+	// 行内改名态（label 仅显示用；portal-agent 证书 label=机器身份，后端拒绝）
+	let renaming = $state<{ id: string; value: string } | null>(null);
 	let form = $state({
 		label: '',
 		kind: 'human',
@@ -28,16 +30,38 @@
 		})
 	);
 
+	async function load() {
+		try {
+			const r = await api<{ certs: CertRecord[] }>('/api/portal/certs');
+			certs = r.certs ?? [];
+		} catch {
+			/* 轮询容错 */
+		}
+	}
+
 	$effect(() => {
-		poll(async () => {
-			try {
-				const r = await api<{ certs: CertRecord[] }>('/api/portal/certs');
-				certs = r.certs ?? [];
-			} catch {
-				/* 轮询容错 */
-			}
-		}, 20000);
+		poll(load, 20000);
 	});
+
+	async function saveRename(c: CertRecord) {
+		if (!renaming || renaming.id !== c.id) return;
+		const label = renaming.value.trim();
+		if (!label || label === c.label) {
+			renaming = null;
+			return;
+		}
+		try {
+			await api('/api/portal/certs/rename', {
+				method: 'POST',
+				body: JSON.stringify({ id: c.id, label })
+			});
+			toast(`已改名：${c.label} → ${label}`);
+			renaming = null;
+			await load();
+		} catch (e) {
+			toast('改名失败：' + (e as Error).message, 'err');
+		}
+	}
 
 	async function register() {
 		if (!form.label || !form.serial) {
@@ -212,12 +236,36 @@
 			<tr><th>Label</th><th>类型</th><th>Serial</th><th>状态</th><th>有效期至</th><th>登记时间</th><th></th></tr>
 		</thead>
 		<tbody>
-			{#each certs as c (c.id)}
-				<tr>
-					<td>
-						<b>{c.label}</b>
-						{#if c.note}<div class="text-xs text-ink-muted">{c.note}</div>{/if}
-					</td>
+				{#each certs as c (c.id)}
+					<tr>
+						<td>
+							{#if renaming?.id === c.id}
+								<div class="flex items-center gap-1.5">
+									<input
+										class="input h-7 w-44 text-[13px]"
+										bind:value={renaming.value}
+										onkeydown={(e) => {
+											if (e.key === 'Enter') saveRename(c);
+											if (e.key === 'Escape') renaming = null;
+										}}
+									/>
+									<button class="btn btn-sm" onclick={() => saveRename(c)}>保存</button>
+									<button class="btn btn-sm" onclick={() => (renaming = null)}>取消</button>
+								</div>
+							{:else}
+								<b>{c.label}</b>
+								{#if isAdmin && c.kind !== 'portal-agent'}
+									<button
+										class="btn btn-sm ml-1.5"
+										title="改显示名（不影响认证；portal-agent 证书的 label 即机器身份，不可改）"
+										onclick={() => (renaming = { id: c.id, value: c.label })}
+									>
+										改名
+									</button>
+								{/if}
+								{#if c.note}<div class="text-xs text-ink-muted">{c.note}</div>{/if}
+							{/if}
+						</td>
 					<td><span class="chip">{c.kind}</span></td>
 					<td class="font-mono text-ink-2" title={c.fingerprint}>{c.serial.slice(0, 18)}…</td>
 					<td>
