@@ -58,11 +58,11 @@ func apiCertsAdd(w http.ResponseWriter, r *http.Request) {
 	u := actorOf(r)
 	saved, err := addCert(c)
 	if err != nil {
-		audit(u.Username, "", "certs.register", c.ID, "fail", err.Error(), r.RemoteAddr)
+		audit(u.Username, "", "certs.register", c.ID, "fail", err.Error(), clientIP(r))
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	audit(u.Username, saved.Serial, "certs.register", saved.ID, "ok", saved.Label, r.RemoteAddr)
+	audit(u.Username, saved.Serial, "certs.register", saved.ID, "ok", saved.Label, clientIP(r))
 	writeOK(w, map[string]any{"cert": saved})
 }
 
@@ -79,13 +79,13 @@ func apiCertsRevoke(w http.ResponseWriter, r *http.Request) {
 	u := actorOf(r)
 	c, err := revokeCert(body.ID)
 	if err != nil {
-		audit(u.Username, "", "certs.revoke", body.ID, "fail", err.Error(), r.RemoteAddr)
+		audit(u.Username, "", "certs.revoke", body.ID, "fail", err.Error(), clientIP(r))
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
 	// 注意：本地 revoke 后必须同步去 CF 面板/调 CF API 吊销该证（见 docs/cf-edge.md §6），
 	// 否则边缘仍放行。此处记审计提醒操作人。
-	audit(u.Username, c.Serial, "certs.revoke", c.ID, "ok", "还需同步到 CF 吊销", r.RemoteAddr)
+	audit(u.Username, c.Serial, "certs.revoke", c.ID, "ok", "还需同步到 CF 吊销", clientIP(r))
 	writeOK(w, map[string]any{"cert": c, "cf_sync_required": true})
 }
 
@@ -127,11 +127,11 @@ func apiCertsRename(w http.ResponseWriter, r *http.Request) {
 	u := actorOf(r)
 	c, err := renameCert(body.ID, label)
 	if err != nil {
-		audit(u.Username, old.Serial, "certs.rename", body.ID, "fail", err.Error(), r.RemoteAddr)
+		audit(u.Username, old.Serial, "certs.rename", body.ID, "fail", err.Error(), clientIP(r))
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	audit(u.Username, old.Serial, "certs.rename", c.ID, "ok", old.Label+" → "+c.Label, r.RemoteAddr)
+	audit(u.Username, old.Serial, "certs.rename", c.ID, "ok", old.Label+" → "+c.Label, clientIP(r))
 	writeOK(w, map[string]any{"cert": c})
 }
 
@@ -158,11 +158,11 @@ func apiAgentTokensIssue(w http.ResponseWriter, r *http.Request) {
 	u := actorOf(r)
 	plain, t, err := issueAgentToken(strings.TrimSpace(body.AgentID), u.Username)
 	if err != nil {
-		audit(u.Username, "", "portal_agent_tokens.issue", body.AgentID, "fail", err.Error(), r.RemoteAddr)
+		audit(u.Username, "", "portal_agent_tokens.issue", body.AgentID, "fail", err.Error(), clientIP(r))
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	audit(u.Username, "", "portal_agent_tokens.issue", t.ID, "ok", "portal-agent="+t.AgentID, r.RemoteAddr)
+	audit(u.Username, "", "portal_agent_tokens.issue", t.ID, "ok", "portal-agent="+t.AgentID, clientIP(r))
 	// 明文只返回这一次
 	writeOK(w, map[string]any{"token": plain, "id": t.ID, "portal_agent_id": t.AgentID})
 }
@@ -179,11 +179,11 @@ func apiAgentTokensRevoke(w http.ResponseWriter, r *http.Request) {
 	}
 	u := actorOf(r)
 	if err := revokeAgentToken(body.ID); err != nil {
-		audit(u.Username, "", "portal_agent_tokens.revoke", body.ID, "fail", err.Error(), r.RemoteAddr)
+		audit(u.Username, "", "portal_agent_tokens.revoke", body.ID, "fail", err.Error(), clientIP(r))
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	audit(u.Username, "", "portal_agent_tokens.revoke", body.ID, "ok", "", r.RemoteAddr)
+	audit(u.Username, "", "portal_agent_tokens.revoke", body.ID, "ok", "", clientIP(r))
 	writeOK(w, nil)
 }
 
@@ -226,11 +226,11 @@ func apiCommandsEnqueue(w http.ResponseWriter, r *http.Request) {
 		CreatedBy: u.Username,
 	})
 	if err != nil {
-		audit(u.Username, "", "commands.enqueue", body.AgentID+"/"+body.Service+body.Project, "fail", err.Error(), r.RemoteAddr)
+		audit(u.Username, "", "commands.enqueue", body.AgentID+"/"+body.Service+body.Project, "fail", err.Error(), clientIP(r))
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	audit(u.Username, "", "commands.enqueue", cmd.ID, "ok", body.Action+" "+body.Service+body.Project, r.RemoteAddr)
+	audit(u.Username, "", "commands.enqueue", cmd.ID, "ok", body.Action+" "+body.Service+body.Project, clientIP(r))
 	writeOK(w, map[string]any{"command": cmd})
 }
 
@@ -249,11 +249,11 @@ func apiEnrollTokensIssue(w http.ResponseWriter, r *http.Request) {
 	u := actorOf(r)
 	plain, t, err := issueEnrollToken(strings.TrimSpace(body.AgentID), u.Username)
 	if err != nil {
-		audit(u.Username, "", "enroll_tokens.issue", body.AgentID, "fail", err.Error(), r.RemoteAddr)
+		audit(u.Username, "", "enroll_tokens.issue", body.AgentID, "fail", err.Error(), clientIP(r))
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	audit(u.Username, "", "enroll_tokens.issue", t.ID, "ok", "portal-agent="+t.AgentID, r.RemoteAddr)
+	audit(u.Username, "", "enroll_tokens.issue", t.ID, "ok", "portal-agent="+t.AgentID, clientIP(r))
 	// 明文只返回这一次（30 分钟有效、单次使用）
 	writeOK(w, map[string]any{"enroll_token": plain, "id": t.ID, "portal_agent_id": t.AgentID, "expires_at": t.ExpiresAt})
 }
@@ -291,7 +291,7 @@ func apiAgentEnroll(w http.ResponseWriter, r *http.Request) {
 	}
 	bound, err := consumeEnrollToken(strings.TrimSpace(body.EnrollToken), agentID)
 	if err != nil {
-		audit(agentID, "", "portal_agent.enroll", agentID, "fail", err.Error(), r.RemoteAddr)
+		audit(agentID, "", "portal_agent.enroll", agentID, "fail", err.Error(), clientIP(r))
 		writeError(w, http.StatusUnauthorized, "invalid enroll token")
 		return
 	}
@@ -300,7 +300,7 @@ func apiAgentEnroll(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, err)
 		return
 	}
-	audit("enroll:"+bound, "", "portal_agent.enroll", tok.ID, "ok", "portal-agent="+bound, r.RemoteAddr)
+	audit("enroll:"+bound, "", "portal_agent.enroll", tok.ID, "ok", "portal-agent="+bound, clientIP(r))
 	writeOK(w, map[string]any{"token": plain, "id": tok.ID, "portal_agent_id": bound})
 }
 
@@ -323,10 +323,10 @@ func apiBackup(w http.ResponseWriter, r *http.Request) {
 	u := actorOf(r)
 	name, err := backupDB()
 	if err != nil {
-		audit(u.Username, "", "db.backup", "", "fail", err.Error(), r.RemoteAddr)
+		audit(u.Username, "", "db.backup", "", "fail", err.Error(), clientIP(r))
 		writeInternalError(w, err)
 		return
 	}
-	audit(u.Username, "", "db.backup", name, "ok", "", r.RemoteAddr)
+	audit(u.Username, "", "db.backup", name, "ok", "", clientIP(r))
 	writeOK(w, map[string]any{"backup": name})
 }

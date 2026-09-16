@@ -42,6 +42,6 @@ DEPLOY_ENV=prod ./scripts/deploy.sh  # 生产（叠加 docker-compose.prod.yml�
 | `services/portal-nginx/` | 源站网关：Origin Pulls + X-Cert-* 透传 |
 | `services/portal-backend/` | Go 门禁 + portal-agent 心跳 + 前端托管 |
 | `services/portal-agent/` | Go 边车：docker 列表 + git 版本 + 心跳外连 |
-| `ui/` | Svelte 5 空页（whoami + agents） |
+| `ui/` | Svelte 5 管理台（仪表盘 / 站点与服务 / 命令与发布 / 用户与设备 / 机器凭据 / 审计） |
 | `docs/cf-edge.md` | CF 边缘配置清单 |
 | `pki/` | dev 自签脚本（永不用于生产） |

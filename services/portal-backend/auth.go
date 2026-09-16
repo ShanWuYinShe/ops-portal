@@ -90,7 +90,7 @@ func requireCert(next http.HandlerFunc) http.HandlerFunc {
 		}
 		if findActiveCert(id.Serial, id.Fingerprint) == nil {
 			log.Printf("portal: unknown/revoked cert serial=%s fp=%s from %s",
-				maskMiddle(id.Serial), maskMiddle(id.Fingerprint), r.RemoteAddr)
+				maskMiddle(id.Serial), maskMiddle(id.Fingerprint), clientIP(r))
 			writeError(w, http.StatusForbidden, "certificate not authorized")
 			return
 		}

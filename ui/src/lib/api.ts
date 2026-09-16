@@ -48,6 +48,8 @@ export interface AgentContainer {
 export interface Agent {
 	portal_agent_id: string;
 	last_seen: string;
+	/** 后端按 AGENT_OFFLINE_AFTER 判定的在线态（单一事实源，前端不自算） */
+	online: boolean;
 	pending: number;
 	heartbeat: {
 		portal_agent_id: string;

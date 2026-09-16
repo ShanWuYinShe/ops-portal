@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"strings"
+	"sync"
 )
 
 // 用户与证书绑定管理（admin）：给 users 表一个管理面，
@@ -122,6 +123,10 @@ func apiUsersList(w http.ResponseWriter, r *http.Request) {
 	writeOK(w, map[string]any{"users": out})
 }
 
+// userMu 串行化用户写操作：「是否最后一个 admin」的判定与写入必须原子，
+// 否则并发降权/删除最后两个 admin 时可能双双通过判定，锁死管理面。
+var userMu sync.Mutex
+
 // POST /api/portal/users/upsert（admin）—— 新增或改绑用户。
 func apiUsersUpsert(w http.ResponseWriter, r *http.Request) {
 	if !mustMethod(w, r, http.MethodPost) {
@@ -160,17 +165,19 @@ func apiUsersUpsert(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "该证书已绑定到用户 "+prev.Username)
 		return
 	}
+	userMu.Lock()
+	defer userMu.Unlock()
 	prevRole, _ := getUserRole(username)
 	prevCert := getUserCertID(username)
 	upsertUser(username, role, certID)
 	// 禁止把最后一个 admin 降权：防锁死管理面（回滚本次写入）。
 	if prevRole == "ops.admin" && role != "ops.admin" && !anotherAdmin(username) {
 		upsertUser(username, prevRole, prevCert)
-		audit(u.Username, "", "users.upsert", username, "fail", "refuse demoting last admin", r.RemoteAddr)
+		audit(u.Username, "", "users.upsert", username, "fail", "refuse demoting last admin", clientIP(r))
 		writeError(w, http.StatusBadRequest, "refuse demoting last admin")
 		return
 	}
-	audit(u.Username, "", "users.upsert", username, "ok", role, r.RemoteAddr)
+	audit(u.Username, "", "users.upsert", username, "ok", role, clientIP(r))
 	writeOK(w, map[string]any{"username": username, "role": role})
 }
 
@@ -195,18 +202,20 @@ func apiUsersRemove(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "refuse removing self")
 		return
 	}
+	userMu.Lock()
+	defer userMu.Unlock()
 	removedRole, ok := getUserRole(username)
 	if !ok {
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
 	if removedRole == "ops.admin" && !anotherAdmin(username) {
-		audit(u.Username, "", "users.remove", username, "fail", "refuse removing last admin", r.RemoteAddr)
+		audit(u.Username, "", "users.remove", username, "fail", "refuse removing last admin", clientIP(r))
 		writeError(w, http.StatusBadRequest, "refuse removing last admin")
 		return
 	}
 	deleteUser(username)
-	audit(u.Username, "", "users.remove", username, "ok", "", r.RemoteAddr)
+	audit(u.Username, "", "users.remove", username, "ok", "", clientIP(r))
 	writeOK(w, map[string]any{"username": username, "removed": true})
 }
 

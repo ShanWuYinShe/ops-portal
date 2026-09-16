@@ -75,7 +75,7 @@ func apiServiceCertIssue(w http.ResponseWriter, r *http.Request) {
 	// 私钥独立 PEM 落盘：portal 主动拨测被管网站 ops 接口时作 mTLS 客户端证书。
 	_ = os.WriteFile(serviceKeyPath(), keyPEM, 0600)
 	_ = os.WriteFile(servicePemPath(), certPEM, 0600)
-	audit(u.Username, serial, "service_cert.issue", c.ID, "ok", "被管网站放行清单用", r.RemoteAddr)
+	audit(u.Username, serial, "service_cert.issue", c.ID, "ok", "被管网站放行清单用", clientIP(r))
 	writeOK(w, map[string]any{
 		"cert_id": c.ID, "serial": serial, "fingerprint": fp,
 		"expires_at": expires, "client_cert": string(certPEM),
@@ -216,7 +216,7 @@ func apiSiteCertificateIssue(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, err)
 		return
 	}
-	audit(u.Username, serial, "site_cert.issue", site, "ok", "", r.RemoteAddr)
+	audit(u.Username, serial, "site_cert.issue", site, "ok", "", clientIP(r))
 	writeOK(w, map[string]any{
 		"site_name": site, "serial": serial, "fingerprint": fp,
 		"expires_at": expires, "client_cert": string(certPEM), "client_key": string(keyPEM),
@@ -253,7 +253,7 @@ func apiSiteRegister(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, err)
 		return
 	}
-	audit("site:"+name, c.Serial, "site.register", body.OpsURL, "ok", "", r.RemoteAddr)
+	audit("site:"+name, c.Serial, "site.register", body.OpsURL, "ok", "", clientIP(r))
 	writeOK(w, map[string]any{"site": name, "registered": true})
 }
 
@@ -285,7 +285,7 @@ func apiSitesUnregister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	clearProbe(name)
-	audit(u.Username, "", "site.unregister", name, "ok", "", r.RemoteAddr)
+	audit(u.Username, "", "site.unregister", name, "ok", "", clientIP(r))
 	writeOK(w, map[string]any{"site": name, "unregistered": true})
 }
 

@@ -63,7 +63,7 @@ func apiAgentCertificateIssue(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, err)
 		return
 	}
-	audit(u.Username, serial, "portal_agent_cert.issue", agentID, "ok", tok.ID, r.RemoteAddr)
+	audit(u.Username, serial, "portal_agent_cert.issue", agentID, "ok", tok.ID, clientIP(r))
 	writeOK(w, map[string]any{
 		"portal_agent_id": agentID, "client_cert": string(certPEM),
 		"client_key": string(key), "portal_agent_token": tokenPlain,

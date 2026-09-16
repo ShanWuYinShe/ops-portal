@@ -3,8 +3,8 @@
 #
 # 前置：本机已 checkout ops-portal 仓库（脚本用 services/portal-agent 构建镜像）；
 #       管理员在 portal 侧交付 bundle.json（含 enroll_token/client_cert/
-#       client_key：注册令牌在「Portal-Agent 令牌」页签发，机器证书在
-#       「机器证书包」接口签发后拼成 bundle 交付本机）。
+#       client_key：注册令牌在「机器凭据」页签发，机器证书在
+#       「机器凭据」页的机器证书包签发后拼成 bundle 交付本机）。
 #
 # 用法：
 #   bash scripts/onboard-portal-agent.sh \
@@ -16,7 +16,7 @@
 #
 # 行为：落盘机器证书 → 生成 portal-agent-compose.generated.yml（含 PORTAL_AGENT_ENROLL_TOKEN
 #       与证书/token 落盘挂载）→ 构建启动 → agent 首次启动自助兑换正式 token
-#       并落盘到 portal-agent-secrets/ → 到 portal「站点」页确认心跳出现。
+#       并落盘到 portal-agent-secrets/ → 到 portal「站点与服务」页确认心跳出现。
 #       长效 token 永不经人工手；enroll 令牌 30 分钟有效、单次使用。
 
 set -euo pipefail
@@ -126,5 +126,5 @@ docker compose -f "$COMPOSE_OUT" up -d --build
 echo "==> agent 已启动（容器 ${PORTAL_AGENT_ID}），首次启动自动兑换 token 并上报心跳"
 echo "==> 到 portal「站点与服务」页确认心跳出现（≤30 秒，含兑换）。"
 [[ $LOCAL -eq 1 ]] && echo "提示：--local 模式要求本机已运行 ops-portal 主 compose（网络 ops-portal_portal_net）。"
-echo "==> 更换 token/吊销：portal「Portal-Agent 令牌」页吊销后，删 portal-agent-secrets/agent-token，"
+echo "==> 更换 token/吊销：portal「机器凭据」页吊销后，删 portal-agent-secrets/agent-token，"
 echo "    重新签发 enroll 令牌并更新 $COMPOSE_OUT 中 PORTAL_AGENT_ENROLL_TOKEN，再 up -d。"

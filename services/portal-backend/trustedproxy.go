@@ -99,3 +99,15 @@ func isTrustedProxy(r *http.Request) bool {
 	}
 	return false
 }
+
+// clientIP 审计用的真实客户端 IP：受信代理（portal-nginx）按
+// CF-Connecting-IP 解析后经 X-Real-IP 透传，仅在来自受信代理时采信；
+// 其余（内网直连、未知来源）退回连接对端地址。
+func clientIP(r *http.Request) string {
+	if isTrustedProxy(r) {
+		if v := strings.TrimSpace(r.Header.Get("X-Real-IP")); v != "" {
+			return v
+		}
+	}
+	return r.RemoteAddr
+}

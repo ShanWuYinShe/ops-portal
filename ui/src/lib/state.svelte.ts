@@ -28,10 +28,6 @@ export function roleLevel(role: string | undefined): number {
 	return { 'ops.admin': 3, 'ops.operator': 2, 'ops.viewer': 1 }[role ?? ''] ?? 0;
 }
 
-export function agentOnline(lastSeen: string): boolean {
-	return !!lastSeen && Date.now() - new Date(lastSeen).getTime() < 60_000;
-}
-
 export function relTime(iso: string): string {
 	if (!iso) return '—';
 	const s = (Date.now() - new Date(iso).getTime()) / 1000;

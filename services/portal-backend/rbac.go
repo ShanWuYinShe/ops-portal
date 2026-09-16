@@ -57,7 +57,7 @@ func requireRole(minRole string, next http.HandlerFunc) http.HandlerFunc {
 		id := certFromRequest(r)
 		u := currentUser(r, id)
 		if roleLevel(u.Role) < min {
-			audit(u.Username, id.Serial, "authz.deny", r.URL.Path, "fail", "need "+minRole, r.RemoteAddr)
+			audit(u.Username, id.Serial, "authz.deny", r.URL.Path, "fail", "need "+minRole, clientIP(r))
 			writeError(w, http.StatusForbidden, "insufficient role")
 			return
 		}

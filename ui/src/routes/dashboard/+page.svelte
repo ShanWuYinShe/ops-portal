@@ -1,11 +1,12 @@
 <script lang="ts">
-	import { agentOnline, badgeCls, portal, relTime } from '$lib/state.svelte';
+	import { badgeCls, portal, relTime } from '$lib/state.svelte';
 	import SiteHealthBadge from '$lib/SiteHealthBadge.svelte';
 
 	// 仪表盘只做摘要与跳转入口：站点运行详情在 /sites，操作在 /ops。
 	// 勿在此重复 sites 的表格/操作——数据源同为全局 portal 状态（layout 轮询）。
+	// agent 在线态用后端返回的 online 字段（与告警看门狗同口径），前端不自算。
 
-	const online = $derived(portal.agents.filter((a) => agentOnline(a.last_seen)));
+	const online = $derived(portal.agents.filter((a) => a.online));
 	const containers = $derived(portal.agents.flatMap((a) => a.heartbeat?.containers ?? []));
 	const running = $derived(containers.filter((c) => c.state === 'running'));
 	const sitesWithRuntime = $derived(portal.sites.filter((s) => s.containers.length > 0));
@@ -102,8 +103,8 @@
 		{:else}
 			{#each portal.agents as a (a.portal_agent_id)}
 				<div class="flex items-center gap-2.5 py-1">
-					<span class="badge {badgeCls(agentOnline(a.last_seen) ? 'ok' : 'err')}">
-						{agentOnline(a.last_seen) ? '在线' : '离线'}
+					<span class="badge {badgeCls(a.online ? 'ok' : 'err')}">
+						{a.online ? '在线' : '离线'}
 					</span>
 					<span class="font-mono text-[13px]">{a.portal_agent_id}</span>
 					<span class="text-xs text-ink-2">{a.heartbeat?.hostname}</span>

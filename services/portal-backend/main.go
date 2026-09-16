@@ -132,8 +132,10 @@ func apiPortalAgents(w http.ResponseWriter, r *http.Request) {
 		out = append(out, map[string]any{
 			"portal_agent_id": id,
 			"last_seen":       st.LastSeen.Format(time.RFC3339),
-			"pending":         pending,
-			"heartbeat":       st.Heartbeat,
+			// 在线态以后端判定为准（AGENT_OFFLINE_AFTER），前端不再自算
+			"online":    agentOnlineAt(st.LastSeen),
+			"pending":   pending,
+			"heartbeat": st.Heartbeat,
 		})
 	}
 	writeOK(w, map[string]any{"agents": out})
@@ -208,6 +210,11 @@ func main() {
 		log.Fatalf("portal: open db failed: %v", err)
 	}
 	purgeOldAudit()
+	// dev 免证开关一旦误入生产等于管理面全开（无证按 ops.admin 放行），
+	// 启动即高声提示，让日志里看得见。
+	if getEnv("DEV_ALLOW_NO_CERT", "") != "" {
+		log.Printf("portal: WARNING: DEV_ALLOW_NO_CERT 已启用——无证请求按 ops.admin 放行，仅限本地联调，生产必须留空")
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/portal/health", apiPortalHealth)
@@ -287,6 +294,8 @@ func main() {
 	startProbeLoop()
 	// agent 心跳超时看门狗：online↔offline 跃迁进告警（alerts.go）。
 	startAgentWatchdog()
+	// 审计保留期按天兜底清理（启动时已清一次；不常备份的部署也保生效）。
+	startRetentionLoop()
 	log.Printf("ops-portal backend listening on :%s", port)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)

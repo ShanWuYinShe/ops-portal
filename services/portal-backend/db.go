@@ -502,6 +502,18 @@ func purgeOldAudit() {
 	}
 }
 
+// startRetentionLoop 每天按保留期清理一次审计。purgeOldAudit 原本只在
+// 启动与备份前执行，长期不重启也不备份的部署会一直不清理。
+func startRetentionLoop() {
+	go func() {
+		t := time.NewTicker(24 * time.Hour)
+		defer t.Stop()
+		for range t.C {
+			purgeOldAudit()
+		}
+	}()
+}
+
 // backupDB 在线备份：VACUUM INTO 快照 + 只留最新 14 份。返回备份文件名。
 func backupDB() (string, error) {
 	db, err := getDB()
