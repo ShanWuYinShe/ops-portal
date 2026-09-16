@@ -157,7 +157,11 @@ portal-agent 默认每 10s（可配 `HEARTBEAT_INTERVAL`；本地 dev compose �
 | `deploy` | `project` + `targets[]` | `docker compose -p <project> --project-directory <dir> up -d --build <targets...>`，只重建受影响服务 |
 
 命令生命周期：`queued → acked（portal-agent 取走）→ done | failed`。
+agent 取走后 30 分钟未回传结果的按悬挂清理（标 failed，结果注明原因）；
+排队超 `COMMAND_TTL`（默认 24h）的标 expired 不再下发。
 portal-agent 侧双重白名单：`PORTAL_AGENT_COMPOSE_PROJECTS`（项目）+ `PORTAL_AGENT_DEPLOY_DIRS`（目录映射）。
+命令在 agent 侧独立于心跳循环串行执行：deploy 等长命令不阻塞心跳，
+不会因执行期间心跳停发而被 portal 误判掉线。
 
 ## 心跳超时告警（portal 侧）
 

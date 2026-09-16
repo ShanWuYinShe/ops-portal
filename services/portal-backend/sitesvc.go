@@ -333,7 +333,9 @@ type siteView struct {
 	CheckedAt string `json:"checked_at,omitempty"`
 }
 
-func agentOnlineAt(t time.Time) bool { return time.Since(t) < time.Minute }
+// agentOnlineAt 与告警看门狗同一判定（AGENT_OFFLINE_AFTER，默认 60s），
+// 避免站点视图与 agents 视图对「在线」的口径不一致。
+func agentOnlineAt(t time.Time) bool { return time.Since(t) <= agentOfflineAfter() }
 
 // buildSiteViews 按网站名聚合心跳与注册表；名字升序。
 func buildSiteViews() ([]siteView, error) {

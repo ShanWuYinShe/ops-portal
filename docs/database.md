@@ -20,7 +20,9 @@ agent 更名 portal-agent 时同步改名了表/列与 kind 值，启动时幂�
 
 - 表 `agent_tokens` → `portal_agent_tokens`；
 - 列 `commands.agent_id` → `portal_agent_id`；
-- `certs.kind` / `portal_agent_tokens.kind` 存量值 `agent` → `portal-agent`。
+- `certs.kind` / `portal_agent_tokens.kind` 存量值 `agent` → `portal-agent`；
+- 列 `commands.acked_at` 补列（`db.go addColumnIfMissing`，幂等）：
+  记录 agent 取走命令的时刻，用于清理「取走后从未回传」的悬挂命令。
 
 令牌明文前缀 `opsa_` → `opa_`：hash 对明文计算，旧令牌不迁移，
 改名版本部署后为 portal-agent 重新签发令牌（旧令牌作废）。
@@ -40,7 +42,8 @@ agent 更名 portal-agent 时同步改名了表/列与 kind 值，启动时幂�
 
 - 审计：`AUDIT_RETENTION_DAYS`（默认 180），启动与备份前清理过期行。
 - 命令：终结（done/failed/expired）只留最新 500 条，排队命令
-  `COMMAND_TTL`（默认 24h）过期后标 expired 不再下发。
+  `COMMAND_TTL`（默认 24h）过期后标 expired 不再下发；agent 取走
+  （acked）后 30 分钟未回传结果的标 failed，不再永久积压。
 
 ## 容量实测（2026-09-14，本机 + 容器内实测，非推算）
 

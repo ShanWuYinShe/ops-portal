@@ -114,9 +114,15 @@ func apiPortalAgents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
+	// 锁内只做快照拷贝，pending 统计的 DB 查询放到锁外，避免拖住心跳写入。
 	agentStore.Lock()
-	out := make([]map[string]any, 0, len(agentStore.m))
+	snap := make(map[string]agentState, len(agentStore.m))
 	for id, st := range agentStore.m {
+		snap[id] = st
+	}
+	agentStore.Unlock()
+	out := make([]map[string]any, 0, len(snap))
+	for id, st := range snap {
 		pending := 0
 		for _, c := range listCommands(id) {
 			if c.Status == "queued" || c.Status == "acked" {
@@ -130,7 +136,6 @@ func apiPortalAgents(w http.ResponseWriter, r *http.Request) {
 			"heartbeat":       st.Heartbeat,
 		})
 	}
-	agentStore.Unlock()
 	writeOK(w, map[string]any{"agents": out})
 }
 
@@ -139,8 +144,8 @@ func apiPortalWhoami(w http.ResponseWriter, r *http.Request) {
 	u := userFromContext(r)
 	writeOK(w, map[string]any{
 		// 边缘透传的 X-Cert-Verify 原值是字符串（"true"/"false"/空），
-		// 对外统一为布尔：非空即边缘已验证。
-		"verified":    strings.TrimSpace(id.Verified) != "",
+		// 对外统一为布尔：非假值即边缘已验证（见 auth.go edgeVerified）。
+		"verified":    edgeVerified(id),
 		"serial":      id.Serial,
 		"subject":     id.Subject,
 		"fingerprint": id.Fingerprint,
@@ -253,7 +258,14 @@ func main() {
 
 	// 前端 SPA（SvelteKit adapter-static 产物，Docker 构建时拷到 /app/ui）。
 	// 文件存在则直出，未知路径回退 index.html（客户端路由 /dashboard 等）。
+	// 注意：未知 /api/ 路径不能回退 index.html（会 200 返回 HTML，前端把
+	// 错误吞掉），一律 404 JSON；非 GET 的未知 /api/ 由 mux 直接 405，
+	// 与历史行为一致（不能注册 "/api/" 兜底 pattern——与 "GET /" 冲突 panic）。
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			writeError(w, http.StatusNotFound, "not found")
+			return
+		}
 		upath := filepath.Clean("/app/ui" + r.URL.Path)
 		if upath != "/app/ui" && !strings.HasPrefix(upath, "/app/ui/") {
 			http.NotFound(w, r)

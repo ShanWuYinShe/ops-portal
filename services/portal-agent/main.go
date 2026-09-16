@@ -77,7 +77,7 @@ func main() {
 	}
 
 	ctx := context.Background()
-	// token 解析：AGENT_TOKEN / 落盘 / enroll 自注册三选一（见 enroll.go）。
+	// token 解析：PORTAL_AGENT_TOKEN / 落盘 / enroll 自注册三选一（见 enroll.go）。
 	token, err := resolveToken(ctx, portalURL, agentID)
 	if err != nil {
 		log.Fatalf("token: %v", err)
@@ -91,6 +91,16 @@ func main() {
 
 	hostname, _ := os.Hostname()
 	log.Printf("portal-agent %s -> %s every %s (projects=%v)", agentID, portalURL, dur, projects)
+
+	// 命令执行与心跳分离：deploy 最长 10 分钟，若在心跳循环里串行执行，
+	// 期间心跳停发会被 portal 判为掉线并误发告警。单独 goroutine 串行执行
+	// （channel 天然排队，不并发操作 docker），心跳不受执行时长影响。
+	cmdQueue := make(chan []inboundCommand, 16)
+	go func() {
+		for cmds := range cmdQueue {
+			drainCommands(ctx, cli, portalURL, token, agentID, cmds, projects, deployDirs)
+		}
+	}()
 
 	tick := time.NewTicker(dur)
 	defer tick.Stop()
@@ -109,8 +119,8 @@ func main() {
 		cmds, err := postHeartbeat(ctx, portalURL, token, req)
 		if err != nil {
 			log.Printf("heartbeat: post failed: %v", err)
-		} else {
-			drainCommands(ctx, cli, portalURL, token, agentID, cmds, projects, deployDirs)
+		} else if len(cmds) > 0 {
+			cmdQueue <- cmds
 		}
 		<-tick.C
 	}

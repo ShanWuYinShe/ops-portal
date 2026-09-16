@@ -29,6 +29,8 @@ let confirmResolve: ((v: boolean) => void) | null = null;
 
 export function askConfirm(title: string, message: string, danger = false): Promise<boolean> {
 	return new Promise((resolve) => {
+		// 已有弹窗未处理时先按取消结算，避免上一个调用方的 Promise 永久悬挂。
+		confirmResolve?.(false);
 		confirmResolve = resolve;
 		confirmBox.current = { title, message, danger };
 	});

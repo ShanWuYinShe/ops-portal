@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 )
@@ -94,6 +93,9 @@ func genCSR(cn string) (keyPEM, csrPEM []byte, err error) {
 func cfZoneID() string   { return getEnv("CF_ZONE_ID", "") }
 func cfAPIToken() string { return getEnv("CF_API_TOKEN", "") }
 
+// cfAPIClient 带 30s 整体超时：CF API 挂起不能拖死签发请求（admin handler 同步等待）。
+var cfAPIClient = &http.Client{Timeout: 30 * time.Second}
+
 func cfIssueClientCert(csrPEM []byte) (certPEM []byte, cfID, serial, fp, expires string, err error) {
 	if cfAPIToken() == "" || cfZoneID() == "" {
 		return nil, "", "", "", "", errors.New("CF_API_TOKEN/CF_ZONE_ID not configured")
@@ -105,7 +107,7 @@ func cfIssueClientCert(csrPEM []byte) (certPEM []byte, cfID, serial, fp, expires
 		bytes.NewBufferString(body))
 	req.Header.Set("Authorization", "Bearer "+cfAPIToken())
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := cfAPIClient.Do(req)
 	if err != nil {
 		return nil, "", "", "", "", err
 	}
@@ -128,9 +130,6 @@ func cfIssueClientCert(csrPEM []byte) (certPEM []byte, cfID, serial, fp, expires
 	if !out.Success {
 		return nil, "", "", "", "", fmt.Errorf("CF API: %v", out.Errors)
 	}
-	_ = os.Getenv // 保持 os 引用（getEnv 已用）
 	return []byte(out.Result.Certificate), out.Result.ID, out.Result.SerialNumber,
 		out.Result.FingerprintSHA256, out.Result.ExpiresOn, nil
 }
-
-var _ = time.Now

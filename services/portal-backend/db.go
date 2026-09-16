@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS commands (
   status TEXT NOT NULL DEFAULT 'queued',
   created_by TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT '',
+  acked_at TEXT NOT NULL DEFAULT '',
   result TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_commands_agent ON commands(portal_agent_id, status);
@@ -135,6 +136,11 @@ func getDB() (*sql.DB, error) {
 	}
 	migrateRenames(db)
 	if _, err := db.Exec(schema); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	// 旧库补列（幂等）：commands.acked_at 用于悬挂 acked 命令的超时清理。
+	if err := addColumnIfMissing(db, "commands", "acked_at", `ALTER TABLE commands ADD COLUMN acked_at TEXT NOT NULL DEFAULT ''`); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -207,6 +213,34 @@ func renameColumnIfLegacy(db *sql.DB, table, legacy, modern string) {
 	} else {
 		log.Printf("db: renamed column %s.%s -> %s", table, legacy, modern)
 	}
+}
+
+// addColumnIfMissing 表存在且缺列时补列（PRAGMA 探测，幂等）。
+// 全新库由 schema 直接建齐，此处空转。
+func addColumnIfMissing(db *sql.DB, table, column, ddl string) error {
+	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return err // 表不存在：schema 会建
+	}
+	defer rows.Close()
+	has := false
+	for rows.Next() {
+		var cid, notnull, pk int
+		var name, ctype string
+		var dflt any
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err == nil && name == column {
+			has = true
+		}
+	}
+	rows.Close()
+	if has {
+		return nil
+	}
+	if _, err := db.Exec(ddl); err != nil {
+		return err
+	}
+	log.Printf("db: added column %s.%s", table, column)
+	return nil
 }
 
 func boolInt(b bool) int {

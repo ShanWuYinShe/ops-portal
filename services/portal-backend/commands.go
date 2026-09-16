@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"time"
@@ -21,10 +22,12 @@ type portalCommand struct {
 	Status    string   `json:"status"` // queued / acked / done / failed / expired
 	CreatedBy string   `json:"created_by"`
 	CreatedAt string   `json:"created_at"`
-	Result    string   `json:"result"`
+	// AckedAt：agent 取走命令的时刻。用于识别「取走后从未回传」的悬挂命令。
+	AckedAt string `json:"acked_at,omitempty"`
+	Result  string `json:"result"`
 }
 
-const commandColumns = `id,portal_agent_id,action,service,project,targets,status,created_by,created_at,result`
+const commandColumns = `id,portal_agent_id,action,service,project,targets,status,created_by,created_at,acked_at,result`
 
 func marshalTargets(t []string) (string, error) {
 	if t == nil {
@@ -51,7 +54,7 @@ func scanCommand(row interface {
 	c := &portalCommand{}
 	var targets string
 	err := row.Scan(&c.ID, &c.AgentID, &c.Action, &c.Service, &c.Project,
-		&targets, &c.Status, &c.CreatedBy, &c.CreatedAt, &c.Result)
+		&targets, &c.Status, &c.CreatedBy, &c.CreatedAt, &c.AckedAt, &c.Result)
 	if err != nil {
 		return nil, err
 	}
@@ -63,6 +66,11 @@ var validActions = map[string]bool{"start": true, "stop": true, "restart": true,
 
 // 已终结（done/failed/expired）命令的保留条数上限，防表无限增长。
 const maxTerminalCommands = 500
+
+// commandAckTimeout acked 命令回传超时：agent 取走命令后崩溃/重启则永远停在
+// acked，心跳时发现超时即标 failed，不再永久积压。deploy 最长 10 分钟 +
+// 回传重试约 1 分钟，30 分钟留足余量。
+const commandAckTimeout = 30 * time.Minute
 
 // commandTTL 排队命令有效期：agent 长时间离线后上线不再执行过期命令。
 // 环境变量 COMMAND_TTL（默认 24h；非法值回退默认）。
@@ -108,9 +116,9 @@ func enqueueCommand(cmd portalCommand) (*portalCommand, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := db.Exec(`INSERT INTO commands (`+commandColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+	if _, err := db.Exec(`INSERT INTO commands (`+commandColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
 		cmd.ID, cmd.AgentID, cmd.Action, cmd.Service, cmd.Project, tg,
-		cmd.Status, cmd.CreatedBy, cmd.CreatedAt, cmd.Result); err != nil {
+		cmd.Status, cmd.CreatedBy, cmd.CreatedAt, cmd.AckedAt, cmd.Result); err != nil {
 		return nil, err
 	}
 	pruneCommands()
@@ -129,12 +137,14 @@ func pruneCommands() {
 }
 
 // takeCommands 取走该 agent 的 queued 命令并标 acked（心跳时调用）。
-// 已过有效期的 queued 命令标 expired，不再下发。
+// 已过有效期的 queued 命令标 expired；取走后迟迟未回传的悬挂 acked 标 failed，
+// 不再下发。
 func takeCommands(agentID string) []portalCommand {
 	db, err := getDB()
 	if err != nil {
 		return nil
 	}
+	expireStaleAcked(db, agentID, time.Now())
 	rows, err := db.Query(`SELECT `+commandColumns+` FROM commands WHERE portal_agent_id=? AND status='queued'`, agentID)
 	if err != nil {
 		return nil
@@ -161,13 +171,50 @@ func takeCommands(agentID string) []portalCommand {
 				"expired: queued beyond TTL, not executed", p.id)
 			continue
 		}
-		if _, err := db.Exec(`UPDATE commands SET status='acked' WHERE id=? AND status='queued'`, p.id); err != nil {
+		if _, err := db.Exec(`UPDATE commands SET status='acked', acked_at=? WHERE id=? AND status='queued'`,
+			now.UTC().Format(time.RFC3339), p.id); err != nil {
 			continue
 		}
 		p.cmd.Status = "acked"
+		p.cmd.AckedAt = now.UTC().Format(time.RFC3339)
 		out = append(out, p.cmd)
 	}
 	return out
+}
+
+// expireStaleAcked 把「agent 取走后一直没回传」的 acked 命令标 failed。
+// 有 acked_at 的按取走时刻 + 超时判；老数据无 acked_at 按 created_at + TTL 兜底
+// （排队最长 TTL，超时后仍未终结即属悬挂）。
+func expireStaleAcked(db *sql.DB, agentID string, now time.Time) {
+	rows, err := db.Query(`SELECT id, acked_at, created_at FROM commands
+		WHERE portal_agent_id=? AND status='acked'`, agentID)
+	if err != nil {
+		return
+	}
+	type hang struct{ id, ackedAt, createdAt string }
+	var stale []string
+	for rows.Next() {
+		var h hang
+		if err := rows.Scan(&h.id, &h.ackedAt, &h.createdAt); err != nil {
+			break
+		}
+		ref := h.ackedAt
+		limit := commandAckTimeout
+		if ref == "" {
+			ref = h.createdAt
+			limit += commandTTL()
+		}
+		ts, err := time.Parse(time.RFC3339, ref)
+		if err != nil || now.Sub(ts) <= limit {
+			continue
+		}
+		stale = append(stale, h.id)
+	}
+	rows.Close()
+	for _, id := range stale {
+		_, _ = db.Exec(`UPDATE commands SET status='failed', result=? WHERE id=? AND status='acked'`,
+			"failed: agent took the command but never reported a result", id)
+	}
 }
 
 // reportCommand agent 回传执行结果。

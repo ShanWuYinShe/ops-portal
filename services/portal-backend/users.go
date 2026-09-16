@@ -143,8 +143,21 @@ func apiUsersUpsert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := actorOf(r)
-	if !certIDExists(certID) {
+	c, err := getCertByID(certID)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "unknown cert_id")
+		return
+	}
+	// 机器身份证书（portal-agent/service/site）不可作登录绑定：它们是
+	// 机器/网站的身份凭证，绑人会让持钥机器获得人的角色（与 rename 同样保护）。
+	if c.Kind != "human" {
+		writeError(w, http.StatusBadRequest,
+			"只能绑定人用（human）证书；portal-agent/service/site 证书是机器或网站身份，不可作登录绑定")
+		return
+	}
+	// 一证一用户：同一证书绑给两个人会让 currentUser 命中随机身份。
+	if prev, ok := getUserByCertID(certID); ok && prev.Username != username {
+		writeError(w, http.StatusBadRequest, "该证书已绑定到用户 "+prev.Username)
 		return
 	}
 	prevRole, _ := getUserRole(username)

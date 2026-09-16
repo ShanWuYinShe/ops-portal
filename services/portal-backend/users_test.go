@@ -73,6 +73,41 @@ func TestUsersUpsertRemove(t *testing.T) {
 	}
 }
 
+// 绑定守护：只认 human 证书 + 一证一用户（防身份歧义/机器证书绑人）。
+func TestUsersUpsertCertGuards(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("DATA_DIR", dir)
+	seedCert(t, "cert-h1", "liyou-mbpro")
+	if _, err := addCert(certRecord{ID: "cert-m1", Label: "agent-hotspot-01", Kind: "portal-agent", Serial: "S-m1", Status: "active"}); err != nil {
+		t.Fatalf("addCert agent: %v", err)
+	}
+
+	call := func(h http.HandlerFunc, body string) int {
+		rec, req := adminReq(t, http.MethodPost, body)
+		h(rec, req)
+		return rec.Code
+	}
+
+	// 机器证书不可作登录绑定
+	if code := call(apiUsersUpsert, `{"username":"liyou","role":"ops.admin","cert_id":"cert-m1"}`); code != 400 {
+		t.Fatalf("bind agent cert = %d, want 400", code)
+	}
+	if code := call(apiUsersUpsert, `{"username":"liyou","role":"ops.admin","cert_id":"cert-h1"}`); code != 200 {
+		t.Fatalf("bind human cert = %d", code)
+	}
+	// 同一证书绑给第二人 → 拒绝
+	if code := call(apiUsersUpsert, `{"username":"bob","role":"ops.viewer","cert_id":"cert-h1"}`); code != 400 {
+		t.Fatalf("rebind cert to another user = %d, want 400", code)
+	}
+	// 同一人重复保存（同角色幂等重存）→ 放行
+	if code := call(apiUsersUpsert, `{"username":"liyou","role":"ops.admin","cert_id":"cert-h1"}`); code != 200 {
+		t.Fatalf("re-save same user = %d, want 200", code)
+	}
+	if u, ok := getUserByCertID("cert-h1"); !ok || u.Username != "liyou" {
+		t.Fatalf("binding after re-save = %+v ok=%v", u, ok)
+	}
+}
+
 // 站点注销：删注册表 + 清探测。
 func TestSitesUnregister(t *testing.T) {
 	dir := t.TempDir()

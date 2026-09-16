@@ -28,7 +28,7 @@ func resolveToken(ctx context.Context, portalURL, agentID string) (string, error
 	}
 	enroll := strings.TrimSpace(getEnv("PORTAL_AGENT_ENROLL_TOKEN", ""))
 	if enroll == "" {
-		return "", errors.New("PORTAL_AGENT_TOKEN is required (or AGENT_ENROLL_TOKEN for self-registration)")
+		return "", errors.New("PORTAL_AGENT_TOKEN is required (or PORTAL_AGENT_ENROLL_TOKEN for self-registration)")
 	}
 	tok, err := exchangeEnrollToken(ctx, portalURL, agentID, enroll)
 	if err != nil {
@@ -39,7 +39,7 @@ func resolveToken(ctx context.Context, portalURL, agentID string) (string, error
 			log.Printf("portal-agent: save token file failed: %v", err)
 		}
 	} else {
-		log.Printf("portal-agent: enrolled ok; set AGENT_TOKEN or AGENT_TOKEN_FILE to persist across restarts")
+		log.Printf("portal-agent: enrolled ok; set PORTAL_AGENT_TOKEN_FILE (or PORTAL_AGENT_TOKEN) to persist across restarts")
 	}
 	return tok, nil
 }

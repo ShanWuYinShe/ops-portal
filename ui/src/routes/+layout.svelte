@@ -36,7 +36,9 @@
 	});
 
 	$effect(() => {
-		if (portal.loadError) toast('加载失败：' + portal.loadError, 'err');
+		// 未进入（whoami 为空）时的失败由下方错误卡说明，不重复弹 toast；
+		// 登录后的轮询失败才以 toast 提示。
+		if (portal.whoami && portal.loadError) toast('加载失败：' + portal.loadError, 'err');
 	});
 
 	function visible(item: (typeof NAV)[number]) {
@@ -97,7 +99,21 @@
 	</aside>
 
 	<main class="min-w-0 max-w-[1240px] flex-1 px-7 pt-5.5 pb-12 max-md:px-4">
-		{@render children()}
+		{#if !portal.whoami && portal.loadError}
+			<!-- 进入失败（证书未登记/被吊销、网络故障等）：给明确指引，而非空白页 -->
+			<div class="card mt-8">
+				<div class="card-body p-8 text-center">
+					<h2 class="text-lg font-semibold">无法进入管理站</h2>
+					<p class="mt-2 text-[13.5px] text-ink-2">{portal.loadError}</p>
+					<p class="mt-3 text-[13px] text-ink-muted">
+						请确认本机设备证书有效，且已由管理员在「用户与设备」页登记。
+						刷新页面重试；持续失败请联系管理员检查证书登记与边缘 mTLS 配置。
+					</p>
+				</div>
+			</div>
+		{:else}
+			{@render children()}
+		{/if}
 	</main>
 </div>
 

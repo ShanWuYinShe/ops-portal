@@ -132,17 +132,13 @@ func revokeCert(id string) (*certRecord, error) {
 	return scanCert(db.QueryRow(`SELECT `+certColumns+` FROM certs WHERE id=?`, id))
 }
 
-// certIDExists 证书 id 是否存在（任意状态，用户绑定时防 typo）。
-func certIDExists(id string) bool {
+// getCertByID 按 id 查证书（任意状态）。用户绑定时校验 kind 用。
+func getCertByID(id string) (*certRecord, error) {
 	db, err := getDB()
 	if err != nil {
-		return false
+		return nil, err
 	}
-	var n int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM certs WHERE id=?`, id).Scan(&n); err != nil {
-		return false
-	}
-	return n > 0
+	return scanCert(db.QueryRow(`SELECT `+certColumns+` FROM certs WHERE id=?`, id))
 }
 
 // renameCert 改显示名（label）。认证按 serial/指纹查表不受影响。

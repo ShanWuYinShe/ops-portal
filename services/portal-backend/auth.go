@@ -58,8 +58,19 @@ func certFromRequest(r *http.Request) certIdentity {
 	return id
 }
 
+// edgeVerified 边缘是否判定证书验证通过。CF 无证请求透传的 X-Cert-Verify
+// 是字面量 "false"（见 docs/cf-edge.md），只判非空会把 "false" 当已验证，
+// 故显式排除假值（大小写不敏感）。
+func edgeVerified(id certIdentity) bool {
+	switch strings.ToLower(strings.TrimSpace(id.Verified)) {
+	case "", "false", "0", "no":
+		return false
+	}
+	return true
+}
+
 // requireCert 要求请求携带受信代理转发的有效证书标识。
-// 生产模式双条件：边缘 verified 非空 + serial/指纹命中本地 active 证书库。
+// 生产模式双条件：边缘 verified 为真 + serial/指纹命中本地 active 证书库。
 // 吊销即本地 revoke（边缘 WAF 规则另行同步，见 docs/cf-edge.md）。
 func requireCert(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -73,7 +84,7 @@ func requireCert(next http.HandlerFunc) http.HandlerFunc {
 			next(w, r)
 			return
 		}
-		if strings.TrimSpace(id.Verified) == "" {
+		if !edgeVerified(id) {
 			writeError(w, http.StatusUnauthorized, "client certificate required")
 			return
 		}
