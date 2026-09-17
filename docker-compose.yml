@@ -17,7 +17,7 @@ services:
       dockerfile: ./services/portal-backend/Dockerfile
       args:
         BUN_VERSION: ${BUN_VERSION:-1.3.14}
-        GO_VERSION: ${GO_VERSION:-1.26.5}
+        GO_VERSION: ${GO_VERSION:-1.26.6}
         ALPINE_VERSION: ${ALPINE_VERSION:-3.24.1}
         # 前端构建标识：部署时 `UI_VERSION=$(git rev-parse --short HEAD)` 注入
         UI_VERSION: ${UI_VERSION:-dev}
@@ -110,7 +110,7 @@ services:
       context: ./services/portal-agent
       dockerfile: Dockerfile
       args:
-        GO_VERSION: ${GO_VERSION:-1.26.5}
+        GO_VERSION: ${GO_VERSION:-1.26.6}
         ALPINE_VERSION: ${ALPINE_VERSION:-3.24.1}
     init: true
     # 本地 dev 联调用 root 跑以便读取 OrbStack 的 docker.sock；
