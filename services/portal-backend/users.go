@@ -23,27 +23,6 @@ func getUserByCertID(certID string) (portalUser, bool) {
 	return u, true
 }
 
-func listUsers() []portalUser {
-	db, err := getDB()
-	if err != nil {
-		return []portalUser{}
-	}
-	rows, err := db.Query(`SELECT username, role, cert_id FROM users ORDER BY username`)
-	if err != nil {
-		return []portalUser{}
-	}
-	defer rows.Close()
-	out := []portalUser{}
-	for rows.Next() {
-		u := portalUser{}
-		if err := rows.Scan(&u.Username, &u.Role, &u.CertID); err != nil {
-			return []portalUser{}
-		}
-		out = append(out, u)
-	}
-	return out
-}
-
 func getUserRole(username string) (string, bool) {
 	db, err := getDB()
 	if err != nil {

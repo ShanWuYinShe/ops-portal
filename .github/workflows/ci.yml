@@ -31,11 +31,22 @@ jobs:
       - name: go vet
         run: go vet ./...
         working-directory: services/portal-backend
+      - name: staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@2026.2.1
+          "$(go env GOPATH)/bin/staticcheck" ./...
+        working-directory: services/portal-backend
       - name: go build
         run: go build -o /dev/null .
         working-directory: services/portal-backend
       - name: go test
         run: go test -count=1 ./...
+        working-directory: services/portal-backend
+      # 依赖已知漏洞扫描（官方 vulndb）：backend 当前零发现，作为阻断门禁。
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+          "$(go env GOPATH)/bin/govulncheck" ./...
         working-directory: services/portal-backend
 
   agent:
@@ -55,11 +66,25 @@ jobs:
       - name: go vet
         run: go vet ./...
         working-directory: services/portal-agent
+      - name: staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@2026.2.1
+          "$(go env GOPATH)/bin/staticcheck" ./...
+        working-directory: services/portal-agent
       - name: go build
         run: go build -o /dev/null .
         working-directory: services/portal-agent
       - name: go test
         run: go test -count=1 ./...
+        working-directory: services/portal-agent
+      # 已接受风险（非阻断）：GO-2026-4887 / GO-2026-4883 位于 Moby 守护进程侧
+      # （AuthZ 插件绕过 / 插件校验 off-by-one），agent 仅用 docker 客户端库走
+      # socket 调用，漏洞代码路径不可达；且官方 Fixed in: N/A 无修复版本可升。
+      # 步骤保持非阻断，新漏洞出现时仍会在此可见。
+      - name: govulncheck (non-blocking, known accepted findings)
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+          "$(go env GOPATH)/bin/govulncheck" ./... || true
         working-directory: services/portal-agent
 
   ui:
