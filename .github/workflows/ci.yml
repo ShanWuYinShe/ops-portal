@@ -78,3 +78,57 @@ jobs:
         run: bun run --cwd ui check
       - name: build
         run: bun run --cwd ui build
+
+  # 单测绿不等于进程能启动：路由注册冲突（ServeMux panic）、SPA/CSP 注入
+  # 这类问题只有真实镜像跑起来才暴露。构建镜像 → 起容器 → 断言对外契约。
+  smoke:
+    name: Container smoke (backend image)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build backend image
+        run: |
+          docker build -t ops-portal-backend:ci \
+            -f services/portal-backend/Dockerfile \
+            --build-arg UI_VERSION="${GITHUB_SHA::7}" \
+            --build-arg GOPROXY=https://proxy.golang.org,direct .
+
+      - name: Boot container
+        run: |
+          docker run -d --name smoke -p 127.0.0.1:8319:8319 \
+            -e DATA_DIR=/tmp/data \
+            -e DEV_ALLOW_NO_CERT=1 \
+            -e TRUSTED_PROXY_CIDRS=0.0.0.0/0 \
+            ops-portal-backend:ci
+
+      - name: Wait for health
+        run: |
+          for i in $(seq 1 30); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8319/api/portal/health || true)"
+            [ "$code" = "200" ] && exit 0
+            sleep 2
+          done
+          echo "::error::backend did not become healthy"
+          docker logs smoke
+          exit 1
+
+      - name: Assert external contract
+        run: |
+          set -euo pipefail
+          B=http://127.0.0.1:8319
+          curl -fsS "$B/api/portal/health" | grep -q '"ok":true'
+          curl -fsS "$B/api/portal/whoami" | grep -q '"role":"ops.admin"'
+          # 未知 GET /api/* → 404 JSON，不得回退 SPA index.html
+          test "$(curl -s -o /dev/null -w '%{http_code}' "$B/api/nope")" = "404"
+          curl -s "$B/api/nope" | grep -q '"ok":false'
+          # 未知 POST /api/* → 405（与历史行为一致）
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/api/nope")" = "405"
+          # SPA 客户端路由回退 + CSP 哈希白名单已注入
+          test "$(curl -s -o /dev/null -w '%{http_code}' "$B/dashboard")" = "200"
+          curl -fsSI "$B/" | grep -i '^content-security-policy:' | grep -q 'sha256-'
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f smoke || true
