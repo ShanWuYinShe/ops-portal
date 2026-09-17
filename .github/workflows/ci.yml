@@ -157,3 +157,60 @@ jobs:
       - name: Cleanup
         if: always()
         run: docker rm -f smoke || true
+
+  # 浏览器级 E2E（Playwright，chromium）：真实水合渲染、CSP 零违规、
+  # 登记证书/下发命令/审计备份闭环。对 e2e 容器（dev 免证管理员）跑。
+  e2e:
+    name: UI E2E (Playwright)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build backend image
+        run: |
+          docker build -t ops-portal-backend:ci \
+            -f services/portal-backend/Dockerfile \
+            --build-arg UI_VERSION="${GITHUB_SHA::7}" \
+            --build-arg GOPROXY=https://proxy.golang.org,direct .
+
+      - name: Boot container
+        run: |
+          docker run -d --name e2e -p 127.0.0.1:8319:8319 \
+            -e DATA_DIR=/tmp/data \
+            -e DEV_ALLOW_NO_CERT=1 \
+            -e TRUSTED_PROXY_CIDRS=0.0.0.0/0 \
+            ops-portal-backend:ci
+
+      - name: Wait for health
+        run: |
+          for i in $(seq 1 30); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8319/api/portal/health || true)"
+            [ "$code" = "200" ] && exit 0
+            sleep 2
+          done
+          echo "::error::backend did not become healthy"
+          docker logs e2e
+          exit 1
+
+      - name: Install e2e deps + chromium
+        run: |
+          cd e2e
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Run Playwright tests
+        run: npx playwright test
+        working-directory: e2e
+
+      - name: Upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: e2e/playwright-report/
+          retention-days: 7
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f e2e || true

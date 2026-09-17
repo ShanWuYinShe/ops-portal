@@ -7,15 +7,17 @@
 	let entries = $state<AuditEntry[]>([]);
 	let filter = $state('');
 
+	async function load() {
+		try {
+			const r = await api<{ entries: AuditEntry[] }>('/api/portal/audit');
+			entries = r.entries ?? [];
+		} catch {
+			/* 轮询容错 */
+		}
+	}
+
 	$effect(() => {
-		poll(async () => {
-			try {
-				const r = await api<{ entries: AuditEntry[] }>('/api/portal/audit');
-				entries = r.entries ?? [];
-			} catch {
-				/* 轮询容错 */
-			}
-		}, 15000);
+		poll(load, 15000);
 	});
 
 	const filtered = $derived(
@@ -34,6 +36,7 @@
 		try {
 			const r = await api<{ backup: string }>('/api/portal/backup', { method: 'POST' });
 			toast(`已备份：${r.backup}`);
+			await load(); // 备份记录立即可见，不等轮询
 		} catch (e) {
 			toast('备份失败：' + (e as Error).message, 'err');
 		}

@@ -82,6 +82,7 @@
 				common_name: '', expires_at: '', note: ''
 			};
 			showForm = false;
+			await load(); // 立即刷新，新行不等 20s 轮询
 		} catch (e) {
 			toast('登记失败：' + (e as Error).message, 'err');
 		}
@@ -102,6 +103,7 @@
 				body: JSON.stringify({ id: c.id })
 			});
 			toast(r.cf_sync_required ? '本地已吊销，请同步吊销 CF 侧证书' : '已吊销', 'ok', 5200);
+			await load(); // 状态立即翻转为 revoked，不等轮询
 		} catch (e) {
 			toast('吊销失败：' + (e as Error).message, 'err');
 		}

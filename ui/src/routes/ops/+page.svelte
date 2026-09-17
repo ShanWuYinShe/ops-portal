@@ -15,15 +15,17 @@
 	const operableSites = $derived(portal.sites.filter((s) => s.containers.length > 0));
 	const deploySiteObj = $derived(portal.sites.find((s) => s.name === deploySite));
 
+	async function loadCommands() {
+		try {
+			const r = await api<{ commands: PortalCommand[] }>('/api/portal/commands');
+			commands = r.commands ?? [];
+		} catch {
+			/* 轮询容错 */
+		}
+	}
+
 	$effect(() => {
-		poll(async () => {
-			try {
-				const r = await api<{ commands: PortalCommand[] }>('/api/portal/commands');
-				commands = r.commands ?? [];
-			} catch {
-				/* 轮询容错 */
-			}
-		}, 8000);
+		poll(loadCommands, 8000);
 	});
 
 	// 网站列表刷新后，已选目标可能已不存在，清掉失效选择。
@@ -43,6 +45,7 @@
 				body: JSON.stringify(payload)
 			});
 			toast('已下发，portal-agent 心跳时执行（约 10 秒内）');
+			await loadCommands(); // 新命令立即可见于历史，不等轮询
 			return true;
 		} catch (e) {
 			toast('下发失败：' + (e as Error).message, 'err');
