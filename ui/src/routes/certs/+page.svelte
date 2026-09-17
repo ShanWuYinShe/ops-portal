@@ -185,43 +185,43 @@
 			</div>
 			<div class="mt-2.5 flex flex-wrap items-end gap-2.5">
 				<div class="field">
-					<label>名称（持有人-设备）*</label>
-					<input class="input" placeholder="liyou-iphone" bind:value={form.label} />
+					<label for="f-certLabel">名称（持有人-设备）*</label>
+					<input id="f-certLabel" class="input" placeholder="liyou-iphone" bind:value={form.label} />
 				</div>
 				<div class="field w-40 flex-none">
-					<label>用途</label>
-					<select class="input" bind:value={form.kind}>
+					<label for="f-certKind">用途</label>
+					<select id="f-certKind" class="input" bind:value={form.kind}>
 						<option value="human">人用（登录管理站）</option>
 						<option value="portal-agent">机器用（portal-agent）</option>
 					</select>
 				</div>
 				<div class="field">
-					<label>证书序列号 Serial *</label>
-					<input class="input" placeholder="CF 建证返回的 serial_number" bind:value={form.serial} />
+					<label for="f-certSerial">证书序列号 Serial *</label>
+					<input id="f-certSerial" class="input" placeholder="CF 建证返回的 serial_number" bind:value={form.serial} />
 				</div>
 			</div>
 			<div class="mt-2.5 flex flex-wrap items-end gap-2.5">
 				<div class="field">
-					<label>CF 证书 ID（选填）</label>
-					<input class="input" bind:value={form.cf_id} />
+					<label for="f-certCFID">CF 证书 ID（选填）</label>
+					<input id="f-certCFID" class="input" bind:value={form.cf_id} />
 				</div>
 				<div class="field flex-[2]">
-					<label>SHA-256 指纹（选填）</label>
-					<input class="input" bind:value={form.fingerprint} />
+					<label for="f-certFP">SHA-256 指纹（选填）</label>
+					<input id="f-certFP" class="input" bind:value={form.fingerprint} />
 				</div>
 				<div class="field">
-					<label>有效期至</label>
-					<input class="input" placeholder="2028-12-16" bind:value={form.expires_at} />
+					<label for="f-certExpires">有效期至</label>
+					<input id="f-certExpires" class="input" placeholder="2028-12-16" bind:value={form.expires_at} />
 				</div>
 			</div>
 			<div class="mt-2.5 flex flex-wrap items-end gap-2.5">
 				<div class="field">
-					<label>Common Name（选填）</label>
-					<input class="input" bind:value={form.common_name} />
+					<label for="f-certCN">Common Name（选填）</label>
+					<input id="f-certCN" class="input" bind:value={form.common_name} />
 				</div>
 				<div class="field flex-[2]">
-					<label>备注</label>
-					<input class="input" bind:value={form.note} />
+					<label for="f-certNote">备注</label>
+					<input id="f-certNote" class="input" bind:value={form.note} />
 				</div>
 				<button class="btn btn-primary" onclick={register}>保存</button>
 			</div>
