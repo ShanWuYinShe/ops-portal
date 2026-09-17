@@ -1,10 +1,12 @@
 // 统一 API 客户端：非 2xx 或 ok:false 时抛错。
+// 请求默认 20s 超时（轮询挂死不堆积；调用方可经 opts.signal 覆盖）。
 
 export async function api<T = Record<string, unknown>>(
 	path: string,
 	opts: RequestInit = {}
 ): Promise<T> {
 	const res = await fetch(path, {
+		signal: AbortSignal.timeout(20_000),
 		headers: { 'Content-Type': 'application/json', ...(opts.headers ?? {}) },
 		...opts
 	});

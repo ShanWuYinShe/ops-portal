@@ -273,8 +273,10 @@ func main() {
 			writeError(w, http.StatusNotFound, "not found")
 			return
 		}
-		upath := filepath.Clean("/app/ui" + r.URL.Path)
-		if upath != "/app/ui" && !strings.HasPrefix(upath, "/app/ui/") {
+		// CSP 只对 HTML 文档有意义（策略见 csp.go；nginx 不重复设置）。
+		w.Header().Set("Content-Security-Policy", cspHeader())
+		upath := filepath.Clean(uiDir + r.URL.Path)
+		if upath != uiDir && !strings.HasPrefix(upath, uiDir+"/") {
 			http.NotFound(w, r)
 			return
 		}
@@ -282,13 +284,17 @@ func main() {
 			http.ServeFile(w, r, upath)
 			return
 		}
-		http.ServeFile(w, r, "/app/ui/index.html")
+		http.ServeFile(w, r, uiDir+"/index.html")
 	})
 
 	srv := &http.Server{
 		Addr:              "0.0.0.0:" + port,
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
+		// 慢请求上限：最重的在线备份实测 ~0.1s/10 万行审计，60s 余量充足；
+		// IdleTimeout 复用连接保活上限，防空闲连接占住 fd。
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout:  120 * time.Second,
 	}
 	// 原生注册站点的 ops 接口连通拨测（后台循环，结果进统一网站视图）。
 	startProbeLoop()

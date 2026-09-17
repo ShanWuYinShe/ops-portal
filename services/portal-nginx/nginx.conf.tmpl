@@ -43,6 +43,8 @@ server {
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-Frame-Options "DENY" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    # CSP 不在此设置：哈希白名单须按 UI 产物计算，由 portal-backend 注入
+    # （见 services/portal-backend/csp.go），双头会被浏览器取交集。
 
     # 源站验 Cloudflare：生产 on，本地 dev 自签联调 off。
     ssl_client_certificate /etc/nginx/cloudflare-origin-pull.pem;
