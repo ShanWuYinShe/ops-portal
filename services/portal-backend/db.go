@@ -94,7 +94,9 @@ CREATE TABLE IF NOT EXISTS audit (
   note TEXT NOT NULL DEFAULT '',
   remote_ip TEXT NOT NULL DEFAULT ''
 );
-CREATE INDEX IF NOT EXISTS idx_audit_id ON audit(id);
+-- audit.id 是 INTEGER PRIMARY KEY（rowid 别名）自带索引；旧版误建的显式
+-- idx_audit_id 只增写放大，清理掉。
+DROP INDEX IF EXISTS idx_audit_id;
 `
 
 func dbPath() string { return dataDir() + "/portal.db" }
