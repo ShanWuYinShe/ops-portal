@@ -1,10 +1,11 @@
 # 构建产物与依赖
 services/portal-backend/portal-backend
 services/portal-backend/portal
-services/agent/ops-agent
-services/agent/agent
-ui/dist/
+services/portal-agent/agent
+services/portal-agent/portal-agent
 ui/node_modules/
+# 双锁防复发：本项目只用 bun.lock，package-lock.json 不入库
+ui/package-lock.json
 
 # 运行期数据与秘密（不入库）
 .env
@@ -24,12 +25,17 @@ logs/
 # 系统文件
 .DS_Store
 
-# SvelteKit 构建产物与依赖
+# SvelteKit 构建产物
 ui/.svelte-kit/
 ui/build/
-ui/node_modules/
-services/portal-agent/agent
-services/portal-agent/portal-agent
+
+# portal-agent 一键接入（scripts/onboard-portal-agent.sh）在被管机仓库根
+# 生成的凭据与生成物：含机器证书、长效 token、明文 enroll token，永不入库
+bundle*.json
+portal-agent-client.crt
+portal-agent-secrets/
+portal-agent-compose.generated.yml
+.enroll_token.tmp
 
 # Playwright E2E（e2e/：依赖与运行产物不入库，package-lock.json 入库）
 e2e/node_modules/

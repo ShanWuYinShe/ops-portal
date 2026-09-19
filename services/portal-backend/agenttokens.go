@@ -45,7 +45,9 @@ const tokenColumns = `id,portal_agent_id,hash,created_by,created_at,revoked,kind
 func randHex(n int) string {
 	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {
-		return "randerr"
+		// crypto/rand 失败极罕见；退化成固定串会签出可预测的 token/id，
+		// 宁可当次请求失败（HTTP handler 内 panic 由 net/http recover）。
+		panic("randHex: crypto/rand read failed: " + err.Error())
 	}
 	return hex.EncodeToString(b)
 }
@@ -125,9 +127,6 @@ func consumeEnrollToken(plain, agentID string) (string, error) {
 	if t.Kind != "enroll" || t.Revoked || t.Used {
 		return "", errors.New("invalid enroll token")
 	}
-	if !constantTimeEqual(t.Hash, h) {
-		return "", errors.New("invalid enroll token")
-	}
 	if t.ExpiresAt != "" {
 		if exp, err := time.Parse(time.RFC3339, t.ExpiresAt); err == nil && time.Now().After(exp) {
 			return "", errors.New("enroll token expired")
@@ -147,12 +146,11 @@ func consumeEnrollToken(plain, agentID string) (string, error) {
 }
 
 // validAgentToken 校验 token 明文是否有效（未吊销；enroll 令牌不可作正式 token）。
+// 查表即按 sha256Hex(plain) 精确匹配，命中即有效（constantTimeEqual 在这里
+// 恒真无意义，防时序由「库里只存摘要」保证）。
 func validAgentToken(plain string) (string, bool) {
 	t, err := findTokenByHash(sha256Hex(plain))
 	if err != nil || t.Revoked || t.Kind == "enroll" {
-		return "", false
-	}
-	if !constantTimeEqual(t.Hash, sha256Hex(plain)) {
 		return "", false
 	}
 	return t.AgentID, true
