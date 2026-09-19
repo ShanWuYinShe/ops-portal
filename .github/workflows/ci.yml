@@ -40,7 +40,7 @@ jobs:
         run: go build -o /dev/null .
         working-directory: services/portal-backend
       - name: go test
-        run: go test -count=1 ./...
+        run: go test -race -count=1 ./...
         working-directory: services/portal-backend
       # 依赖已知漏洞扫描（官方 vulndb）：backend 当前零发现，作为阻断门禁。
       - name: govulncheck
@@ -75,7 +75,7 @@ jobs:
         run: go build -o /dev/null .
         working-directory: services/portal-agent
       - name: go test
-        run: go test -count=1 ./...
+        run: go test -race -count=1 ./...
         working-directory: services/portal-agent
       # 已接受风险（非阻断）：GO-2026-4887 / GO-2026-4883 位于 Moby 守护进程侧
       # （AuthZ 插件绕过 / 插件校验 off-by-one），agent 仅用 docker 客户端库走
@@ -86,6 +86,43 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
           "$(go env GOPATH)/bin/govulncheck" ./... || true
         working-directory: services/portal-agent
+
+  # opshttp 是发给各被管站点「拷走即用」的参考包（含验签逻辑），独立 module
+  # 不被 backend/agent 镜像构建经过，必须单独门禁。零第三方依赖，无 go.sum，
+  # setup-go 缓存走默认 **/go.sum 即可。
+  opshttp:
+    name: opshttp (reference package)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.6'
+          cache: true
+
+      - name: gofmt
+        run: test -z "$(gofmt -l services/opshttp/)"
+      - name: go vet
+        run: go vet ./...
+        working-directory: services/opshttp
+      - name: staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@2026.2.1
+          "$(go env GOPATH)/bin/staticcheck" ./...
+        working-directory: services/opshttp
+      - name: go build
+        run: go build -o /dev/null .
+        working-directory: services/opshttp
+      - name: go test
+        run: go test -race -count=1 ./...
+        working-directory: services/opshttp
+      # 零依赖模块只扫 stdlib：与 backend 同 Go 版本，当前应零发现，作阻断门禁。
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+          "$(go env GOPATH)/bin/govulncheck" ./...
+        working-directory: services/opshttp
 
   ui:
     name: Portal UI (SvelteKit)
