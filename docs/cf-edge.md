@@ -21,7 +21,7 @@
 | DNS AAAA → `::30` 橙云 | API | ✅ |
 | mTLS 主机关联（托管 CA） | `PUT .../certificate_authorities/hostname_associations` | ✅ |
 | 设备证书 `liyou-mbpro`（serial `197FE164…`，至 2028-12-16） | API 签发（CSR 本地生成），p12 归档 `~/cf_token_and_cert/ops.yinghuoren.com/` | ✅ |
-| 证书登记 + `liyou/ops.admin` 绑定 | portal 证书库（服务器 `.workwork/data/certs.json`、`users.json`） | ✅ |
+| 证书登记 + `liyou/ops.admin` 绑定 | portal 证书库（服务器 SQLite `portal.db`，见 docs/database.md；JSON 旧档已迁移为 `.migrated`） | ✅ |
 | Transform 透传规则 `ops-cert-passthrough` | API（phase `http_request_late_transform`，action `rewrite`，headers 为**对象**） | ✅ |
 | Origin Pulls + nginx `ssl_verify_client on` | zone 全局 + `ORIGIN_PULL_VERIFY=on` | ✅ |
 
