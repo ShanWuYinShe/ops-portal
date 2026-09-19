@@ -50,7 +50,9 @@ services:
       - CF_API_TOKEN=${CF_API_TOKEN:-}
       - CF_ZONE_ID=${CF_ZONE_ID:-}
     volumes:
-      - ./.workwork/data:/app/data
+      # 运行期数据（portal.db/备份/service 私钥）挂仓库根 ./data：
+      # .workwork/ 是 AI 中间产物目录（按约定可整体清理），不能放生产数据。
+      - ./data:/app/data
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8319/api/portal/health"]
       interval: 30s
