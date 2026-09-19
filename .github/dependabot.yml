@@ -1,7 +1,8 @@
-# 依赖自动更新：仅 GitHub Actions 版本。
+# 依赖自动更新：GitHub Actions 版本 + e2e 的 npm 依赖。
 # docker 基础镜像（Go/Alpine/Bun/Nginx）不在此列——版本由 .env.example
 # 的跨仓库矩阵手工统一（与 hotspot/workwork 对齐），自动升级会造成漂移。
 # Go 模块依赖升级由 govulncheck 门禁按需驱动，不走 dependabot。
+# ui/ 用 bun.lock，dependabot 不支持 bun 锁文件，前端依赖升级手工进行。
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -12,5 +13,17 @@ updates:
       prefix: 持续集成
     groups:
       actions:
+        patterns:
+          - "*"
+  # e2e 是 npm 锁文件（package-lock.json 入库），纳入自动更新；
+  # 升级 PR 会触发 ci.yml 的 e2e 作业真实跑 Playwright，回归有门禁。
+  - package-ecosystem: npm
+    directory: /e2e
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: 构建
+    groups:
+      e2e-deps:
         patterns:
           - "*"
