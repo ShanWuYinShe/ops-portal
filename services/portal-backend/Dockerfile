@@ -24,7 +24,7 @@ WORKDIR /build
 ARG GOPROXY
 ENV GOPROXY=${GOPROXY:-https://goproxy.cn,direct}
 
-COPY services/portal-backend/go.mod ./
+COPY services/portal-backend/go.mod services/portal-backend/go.sum ./
 RUN go mod download
 
 COPY services/portal-backend/ ./
