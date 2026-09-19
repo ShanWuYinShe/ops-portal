@@ -1,0 +1,4 @@
+# agent 镜像构建上下文只需要 Go 源码与模块清单
+Dockerfile
+.dockerignore
+*.md

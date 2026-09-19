@@ -4,7 +4,8 @@ name: ops-portal
 # 与 hotspot / workwork 平级，互不嵌套。portal 本身不挂 docker.sock，
 # 容器操作一律经各机 portal-agent 回连执行。
 #
-# 本地启动：cp .env.example .env && ./pki/dev-selfsign.sh && docker compose up -d --build
+# 本地启动：cp .env.example .env && ./pki/dev-selfsign.sh && docker compose --profile dev up -d --build
+# （--profile dev 会额外起 agent-local，本地演示 agent 心跳回连；不带的只起 nginx+backend）
 # 入口：https://localhost:8443（dev 自签证书，浏览器会告警，属预期）
 
 services:
@@ -49,6 +50,13 @@ services:
       # 机器证书包签发：调 CF 托管 CA API（token 仅服务器 IP 白名单可用）
       - CF_API_TOKEN=${CF_API_TOKEN:-}
       - CF_ZONE_ID=${CF_ZONE_ID:-}
+      # 运行调优（docs/database.md、portal-agent-protocol.md；后端 getEnv 对
+      # 空串回退内置默认，.env 未设置时与原行为一致）
+      - AUDIT_RETENTION_DAYS=${AUDIT_RETENTION_DAYS:-}
+      - COMMAND_TTL=${COMMAND_TTL:-}
+      - OPS_PROBE_INTERVAL=${OPS_PROBE_INTERVAL:-}
+      - AGENT_OFFLINE_AFTER=${AGENT_OFFLINE_AFTER:-}
+      - ALERT_COOLDOWN=${ALERT_COOLDOWN:-}
     volumes:
       # 运行期数据（portal.db/备份/service 私钥）挂仓库根 ./data：
       # .workwork/ 是 AI 中间产物目录（按约定可整体清理），不能放生产数据。
@@ -67,6 +75,14 @@ services:
       dockerfile: Dockerfile
       args:
         NGINX_VERSION: ${NGINX_VERSION:-1.30.4}
+    environment:
+      # 与 portal-backend 相同的四个透传头字段名（entrypoint 自带同值默认，
+      # 空串回退默认）：改 .env 时 nginx 按新名转发、backend 按新名校验，
+      # 避免一处改一处没改导致的 whoami 全 403 静默断认证
+      - CERT_VERIFY_HEADER=${CERT_VERIFY_HEADER:-}
+      - CERT_SERIAL_HEADER=${CERT_SERIAL_HEADER:-}
+      - CERT_SUBJECT_HEADER=${CERT_SUBJECT_HEADER:-}
+      - CERT_FINGERPRINT_HEADER=${CERT_FINGERPRINT_HEADER:-}
     restart: unless-stopped
     init: true
     security_opt:

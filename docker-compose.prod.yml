@@ -8,6 +8,12 @@ services:
     environment:
       - OPS_DOMAIN=${OPS_DOMAIN:-ops.yinghuoren.com}
       - ORIGIN_PULL_VERIFY=on
+      # 与 portal-backend 相同的透传头字段名（dev 侧同款透传，此处随 compose
+      # 合并生效）；空串回退 entrypoint 默认
+      - CERT_VERIFY_HEADER=${CERT_VERIFY_HEADER:-}
+      - CERT_SERIAL_HEADER=${CERT_SERIAL_HEADER:-}
+      - CERT_SUBJECT_HEADER=${CERT_SUBJECT_HEADER:-}
+      - CERT_FINGERPRINT_HEADER=${CERT_FINGERPRINT_HEADER:-}
     networks:
       portal_net: {}
       ipvlan_docker:

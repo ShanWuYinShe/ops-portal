@@ -35,6 +35,25 @@ DEPLOY_ENV=prod ./scripts/deploy.sh  # 生产（叠加 docker-compose.prod.yml�
 `UI_VERSION`/`IMAGE_TAG` 均由脚本按当前 git 自动注入；`UI_VERSION` 显示在
 侧栏底部 `build <sha>`，用于核对线上实际运行的版本；回滚见脚本输出。
 
+生产前置（`docker-compose.prod.yml`，缺一项 `up` 即失败）：
+
+- `.env` 按 `.env.prod.example` 配置；
+- `cert/` 放 Cloudflare Origin CA 源站证书 `server_cert.pem` / `server_cert.key`；
+- 外部网络 `ipvlan_docker` 已存在（ipvlan L3 公网 IPv6 直连；宿主 443 归
+  workwork xray-forward，portal 不再发布宿主端口）。
+
+## 测试
+
+单测/静态检查由 CI 门禁（Go 三 module + ui + smoke + e2e）；本地复现 e2e：
+
+```bash
+docker build -t ops-portal-backend:e2e -f services/portal-backend/Dockerfile .
+docker run -d --name e2e -p 127.0.0.1:8319:8319 -e DATA_DIR=/tmp/data \
+  -e DEV_ALLOW_NO_CERT=1 -e TRUSTED_PROXY_CIDRS=0.0.0.0/0 ops-portal-backend:e2e
+cd e2e && npm ci && npx playwright install chromium && npx playwright test
+docker rm -f e2e
+```
+
 ## 目录
 
 | 路径 | 说明 |

@@ -24,10 +24,6 @@
 | 证书登记 + `liyou/ops.admin` 绑定 | portal 证书库（服务器 SQLite `portal.db`，见 docs/database.md；JSON 旧档已迁移为 `.migrated`） | ✅ |
 | Transform 透传规则 `ops-cert-passthrough` | API（phase `http_request_late_transform`，action `rewrite`，headers 为**对象**） | ✅ |
 | Origin Pulls + nginx `ssl_verify_client on` | zone 全局 + `ORIGIN_PULL_VERIFY=on` | ✅ |
-
-注意：CF 透传的 serial 是**大写** hex，建证 API 返回小写；后端用 `EqualFold` 比较。
-无证请求时透传头为 `false`/空，源站查表不命中即 403。
-
 | WAF 自定义规则 `ops-mtls-required` | API（phase `http_request_firewall_custom`，action `block`） | ✅ |
 
 注意：CF 透传的 serial 是**大写** hex，建证 API 返回小写；后端用 `EqualFold` 比较。

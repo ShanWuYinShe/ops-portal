@@ -9,11 +9,12 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
-if [ "${DEPLOY_ENV:-local}" = "prod" ]; then
-  COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
-else
-  COMPOSE="docker compose -f docker-compose.yml"
-fi
+DEPLOY_ENV="${DEPLOY_ENV:-local}"
+case "$DEPLOY_ENV" in
+  local) COMPOSE="docker compose -f docker-compose.yml" ;;
+  prod)  COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml" ;;
+  *) echo "!! DEPLOY_ENV 仅支持 local|prod（当前值：$DEPLOY_ENV）" >&2; exit 1 ;;
+esac
 
 # 不可变版本：镜像 tag 与前端构建标识同源（git），回滚 = 旧 tag up -d。
 export UI_VERSION="${UI_VERSION:-$(git rev-parse --short HEAD)}"

@@ -1,0 +1,18 @@
+# portal-backend 的 build context 是仓库根（见 docker-compose.yml），
+# 此文件决定哪些内容进入 context：排除敏感/巨型/无关目录，
+# 避免 .git、生产数据库（data/）、源站私钥（cert/）、宿主机 node_modules
+# 被发给 docker daemon（macOS 宿主的 node_modules 覆盖进 alpine 构建阶段
+# 曾是 bun install 失效的隐患）。
+.git
+.env
+.env.*
+.workwork
+data
+cert
+ui/node_modules
+ui/build
+e2e/node_modules
+e2e/test-results
+e2e/playwright-report
+services/portal-agent
+services/portal-nginx
