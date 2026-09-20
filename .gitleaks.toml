@@ -1,0 +1,8 @@
+# gitleaks 配置：在默认规则集之上预留项目专属豁免（与 workwork 同款做法）。
+# 历史已甄别发现按指纹记录在 .gitleaksignore（指纹不含秘密内容）；
+# 项目级误报豁免写在本文件 [allowlist]；两者之外的新发现 CI 即 fail。
+# 当前仓库全历史扫描零发现，先只挂默认规则集，出现误报时在此追加。
+title = "ops-portal gitleaks config"
+
+[extend]
+useDefault = true

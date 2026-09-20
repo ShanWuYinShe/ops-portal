@@ -253,3 +253,87 @@ jobs:
       - name: Cleanup
         if: always()
         run: docker rm -f e2e || true
+
+  # 静态门禁绿不等于镜像能构建：portal-nginx 在构建期在线拉 CF Origin Pull CA
+  # 证书（网络/上游一动就断），portal-agent 装了 docker-cli/docker-cli-compose。
+  # 各来一发真实 docker build；并各跑最小启动冒烟（nginx 用一次性自签证书，
+  # agent 不接 docker.sock 也应进入心跳等待并应答 /health）。
+  images:
+    name: Container build & smoke (nginx & agent)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build portal-nginx image
+        run: docker build -t ops-portal-nginx:ci services/portal-nginx
+
+      - name: portal-nginx smoke
+        run: |
+          mkdir -p nginx-certs
+          openssl req -x509 -newkey rsa:2048 -nodes \
+            -keyout nginx-certs/server_cert.key -out nginx-certs/server_cert.pem \
+            -days 1 -subj "/CN=localhost"
+          docker run -d --name nginx-smoke \
+            --add-host portal-backend:127.0.0.1 \
+            -v "$PWD/nginx-certs:/etc/nginx/certs:ro" \
+            ops-portal-nginx:ci
+          for i in $(seq 1 15); do
+            if docker exec nginx-smoke curl -fsS http://127.0.0.1:8080/nginx-health >/dev/null 2>&1; then
+              echo "nginx-health OK"; exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::portal-nginx did not become healthy"
+          docker logs nginx-smoke
+          exit 1
+
+      - name: Build portal-agent image
+        run: |
+          docker build -t ops-portal-agent:ci \
+            --build-arg GOPROXY=https://proxy.golang.org,direct services/portal-agent
+
+      - name: portal-agent smoke (boots without docker.sock)
+        run: |
+          docker run -d --name agent-smoke \
+            -e PORTAL_AGENT_ID=ci -e PORTAL_AGENT_TOKEN=ci-token \
+            -e PORTAL_URL=http://127.0.0.1:1 -e HEARTBEAT_INTERVAL=2s \
+            ops-portal-agent:ci
+          for i in $(seq 1 15); do
+            if docker exec agent-smoke wget -q --spider http://127.0.0.1:18080/health 2>/dev/null; then
+              docker exec agent-smoke id
+              docker exec agent-smoke wget -qO- http://127.0.0.1:18080/health | grep -q '"ok":true'
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::agent did not become healthy"
+          docker logs agent-smoke
+          exit 1
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f nginx-smoke agent-smoke || true
+
+  # 秘密泄漏门禁：扫全量 git 历史（配置与 workwork 同款：默认规则集 +
+  # 项目级豁免在 .gitleaks.toml；历史已甄别发现按指纹记 .gitleaksignore）。
+  gitleaks:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # 全量历史扫描
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.6'
+          cache: true
+          # 仓库根没有 go.mod,不指定时缓存恢复会报 "Restore cache failed" 警告
+          cache-dependency-path: services/portal-backend/go.sum
+      - name: gitleaks
+        run: |
+          go install github.com/zricethezav/gitleaks/v8@v8.30.1
+          gitleaks git . -c .gitleaks.toml
