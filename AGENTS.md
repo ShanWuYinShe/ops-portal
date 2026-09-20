@@ -11,7 +11,7 @@
 - `services/opshttp/` — Go 参考包（无 main；发给被管站点「拷走即用」，backend/agent 不 import）
 - `services/portal-nginx/` — nginx 配置
 - `ui/` — Svelte 5 + SvelteKit + Tailwind 4，包管理器 **bun**（bun.lock 唯一权威）
-- `e2e/` — Playwright 端到端测试
+- `e2e/` — Playwright 端到端测试，包管理器 npm（package-lock.json 唯一权威，与 ui/ 的 bun 并存，勿混用）
 - `pki/` — 仅开发自签证书，**永不用于生产**
 - compose 三份：`docker-compose.yml`（开发）/ `docker-compose.prod.yml`（生产）/ `portal-agent-compose.yml`（agent 独立编排）；部署脚本 `scripts/deploy.sh`
 
