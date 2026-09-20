@@ -63,6 +63,27 @@ mkdir -p portal-agent-secrets
 chmod 700 portal-agent-secrets
 echo "==> 机器证书已落盘（portal-agent-client.crt/key），enroll 令牌已就位（勿外传）"
 
+# agent 容器以非 root uid 1001（镜像内建 appuser）运行：需读客户端证书
+# （600）、enroll 兑换后写 token 到 portal-agent-secrets/。落盘产物须归
+# uid 1001 所有，否则容器内 cap_drop ALL 读/写都会 permission denied。
+#   - 以 root 执行本脚本：自动 chown；
+#   - 本身就是 uid 1001：无需处理；
+#   - 其他情况：给出修复命令后中止（带病启动会表现为心跳全挂）。
+fix_owner_1001() {
+  local uid gid
+  uid="$(id -u)" gid="$(id -g)"
+  if [ "$uid" -eq 0 ]; then
+    chown -R 1001:1001 "$@"
+  elif [ "$uid" -eq 1001 ] && [ "$gid" -eq 1001 ]; then
+    :
+  else
+    echo "!! 容器内 agent 以 uid 1001 运行，但当前用户（uid=$uid）无法移交文件属主。" >&2
+    echo "   请手动执行后重试：sudo chown -R 1001:1001 portal-agent-client.crt portal-agent-client.key portal-agent-secrets" >&2
+    exit 1
+  fi
+}
+fix_owner_1001 portal-agent-client.crt portal-agent-client.key portal-agent-secrets
+
 # 2) 生成 compose
 if [[ $LOCAL -eq 1 ]]; then
   PORTAL_URL="http://portal-backend:8319"
@@ -93,10 +114,18 @@ services:
     container_name: ${PORTAL_AGENT_ID}
     restart: unless-stopped
     init: true
-    user: "0:0"
+    # 非 root：镜像内建 appuser(uid/gid=1001)；docker.sock 凭 group_add 的
+    # 宿主 docker gid 访问。证书与 token 落盘目录已由本脚本 chown 1001。
+    user: "1001:1001"
     group_add: ["\${DOCKER_GID:-988}"]
     security_opt: ["no-new-privileges:true"]
     cap_drop: [ALL]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:18080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     environment:
       - TZ=Asia/Shanghai
       - PORTAL_AGENT_ID=${PORTAL_AGENT_ID}

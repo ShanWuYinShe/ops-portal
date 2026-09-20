@@ -131,13 +131,24 @@ services:
         GO_VERSION: ${GO_VERSION:-1.26.6}
         ALPINE_VERSION: ${ALPINE_VERSION:-3.24.1}
     init: true
-    # 本地 dev 联调用 root 跑以便读取 OrbStack 的 docker.sock；
-    # 生产被管机用 group_add: ${DOCKER_GID}（与 workwork 一致）。
-    user: "0:0"
+    # 非 root（镜像内建 appuser uid/gid=1001）。OrbStack 的 docker.sock 属
+    # root 组（实测 srw-rw---- root root），故组补 0；Linux 被管机 sock 属
+    # root:docker，见 portal-agent-compose.yml 的 group_add ${DOCKER_GID}。
+    user: "1001:1001"
+    group_add:
+      - "0"
     security_opt:
       - "no-new-privileges:true"
     cap_drop:
       - ALL
+    healthcheck:
+      # agent 自带 127.0.0.1:18080 /health 探活端点（活性）；
+      # portal 连通性由 portal 侧心跳超时告警负责，不在此探测。
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:18080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     logging:
       driver: "json-file"
       options:

@@ -17,13 +17,26 @@ services:
     container_name: ops-portal-agent-server
     restart: unless-stopped
     init: true
-    user: "0:0"
+    # 非 root：镜像内建 appuser(uid/gid=1001)。agent 无写文件需求（站点目录
+    # 全只读挂载，token 走 PORTAL_AGENT_TOKEN 直传），docker.sock 凭
+    # group_add 的宿主 docker gid 访问（与 workwork 同做法）。
+    # 前置：宿主站点目录须对 uid 1001 可读（git 上报与 deploy 读 compose 文件），
+    # 不满足时 `chown -R 1001` 或调目录组权限。
+    user: "1001:1001"
     group_add:
       - "${DOCKER_GID:-988}"
     security_opt:
       - "no-new-privileges:true"
     cap_drop:
       - ALL
+    healthcheck:
+      # agent 自带 127.0.0.1:18080 /health 探活端点（活性）；
+      # portal 连通性由 portal 侧心跳超时告警负责，不在此探测。
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:18080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     logging:
       driver: "json-file"
       options:

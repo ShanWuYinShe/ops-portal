@@ -76,6 +76,10 @@ func main() {
 		log.Fatal("PORTAL_AGENT_ID is required")
 	}
 
+	// 本机 /health 探活端点（容器 healthcheck 用；默认 127.0.0.1:18080，
+	// PORTAL_AGENT_HEALTH_ADDR 置空禁用）。
+	startHealthServer(getEnv("PORTAL_AGENT_HEALTH_ADDR", "127.0.0.1:18080"))
+
 	ctx := context.Background()
 	// token 解析：PORTAL_AGENT_TOKEN / 落盘 / enroll 自注册三选一（见 enroll.go）。
 	token, err := resolveToken(ctx, portalURL, agentID)
@@ -117,6 +121,7 @@ func main() {
 			Containers:      containers,
 		}
 		cmds, err := postHeartbeat(ctx, portalURL, token, req)
+		recordHeartbeat(err)
 		if err != nil {
 			log.Printf("heartbeat: post failed: %v", err)
 		} else if len(cmds) > 0 {
