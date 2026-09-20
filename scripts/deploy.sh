@@ -9,11 +9,36 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
+# ── 工作区校验：脏树 / 落后远端一律中止 ─────────────────────────
+# 部署产物（镜像 tag、UI 版本指纹）都源自当前 HEAD，脏树会造出来路不明的
+# 版本；落后远端则会把旧代码当"最新"发上去。两种情况都宁可停下来人工确认。
+if [ -n "$(git status --porcelain)" ]; then
+  echo "!! 工作区有未提交改动，中止部署（先 commit / restore 再跑）：" >&2
+  git status --short >&2
+  exit 1
+fi
+
+BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+# 注意：下面 echo 里的中文全角括号紧贴变量时必须用 ${VAR} 隔开，
+# 否则 bash 会把多字节字符并入变量名（set -u 下报 unbound variable）。
+echo "==> 核对远端状态（origin/${BRANCH}）…"
+git fetch --quiet origin "$BRANCH" || {
+  echo "!! git fetch origin $BRANCH 失败（网络或权限？），无法确认是否落后远端，中止部署。" >&2
+  echo "   确认网络后重跑；若确要离线部署，请人工核对本地与远端一致后自行承担。" >&2
+  exit 1
+}
+BEHIND="$(git rev-list --count HEAD..origin/"$BRANCH")"
+if [ "$BEHIND" -ne 0 ]; then
+  echo "!! 本地 $BRANCH 落后 origin/${BRANCH} ${BEHIND} 个提交，中止部署。" >&2
+  echo "   先 git pull --ff-only 同步后再跑（不要在落后状态下发布旧代码）。" >&2
+  exit 1
+fi
+
 DEPLOY_ENV="${DEPLOY_ENV:-local}"
 case "$DEPLOY_ENV" in
   local) COMPOSE="docker compose -f docker-compose.yml" ;;
   prod)  COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml" ;;
-  *) echo "!! DEPLOY_ENV 仅支持 local|prod（当前值：$DEPLOY_ENV）" >&2; exit 1 ;;
+  *) echo "!! DEPLOY_ENV 仅支持 local|prod（当前值：${DEPLOY_ENV}）" >&2; exit 1 ;;
 esac
 
 # 不可变版本：镜像 tag 与前端构建标识同源（git），回滚 = 旧 tag up -d。

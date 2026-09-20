@@ -63,4 +63,4 @@ docker rm -f e2e
 | `services/portal-agent/` | Go 边车：docker 列表 + git 版本 + 心跳外连 |
 | `ui/` | Svelte 5 管理台（仪表盘 / 站点与服务 / 命令与发布 / 用户与设备 / 机器凭据 / 审计） |
 | `docs/cf-edge.md` | CF 边缘配置清单 |
-| `pki/` | dev 自签脚本（永不用于生产） |
+| `pki/` | dev 自签脚本（永不用于生产）；`cf_edge_setup.py` 生产边缘 mTLS 规则自动化（CF Transform Rules 注入 X-Cert-\* 透传头 + 可选 WAF 拦截无证请求，幂等可重跑，见脚本 docstring） |
