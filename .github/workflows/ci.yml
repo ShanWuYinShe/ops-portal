@@ -138,6 +138,8 @@ jobs:
         run: bun install --cwd ui --frozen-lockfile
       - name: type-check (svelte-check)
         run: bun run --cwd ui check
+      - name: unit test (vitest)
+        run: bun run --cwd ui test
       - name: build
         run: bun run --cwd ui build
 
