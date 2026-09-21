@@ -1,7 +1,9 @@
 # 生产部署（服务器）：ipvlan 公网 IPv6 + Origin Pulls 强制。
-# 用法：UI_VERSION=$(git rev-parse --short HEAD) docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
-# （UI_VERSION 注入前端构建标识，显示在侧栏底部，用于核对线上版本）
-# 前置：.env 配好（见 .env.prod.example），cert/ 放 Origin CA 源站证书。
+# 用法：DEPLOY_ENV=prod ./scripts/deploy.sh（统一走部署脚本：prod 预检 + git 版本
+# 注入 + 构建 + 健康校验 + 回滚提示。UI_VERSION 注入前端构建标识，显示在侧栏
+# 底部 build <sha>，用于核对线上实际运行的版本）
+# 前置：.env 配好（见 .env.prod.example），cert/ 放 Origin CA 源站证书，
+# ipvlan_docker 网络与 data/ 属主等清单见 README「生产前置」。
 
 services:
   portal-nginx:

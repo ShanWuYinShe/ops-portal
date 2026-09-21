@@ -8,7 +8,12 @@ token 权限要求（cf_account_token 已满足 Transform 部分）：
 
 用法：
   CF_RULES_TOKEN=$(cat ~/cf_token_and_cert/cf_account_token) \
+    CF_ZONE_ID=<32位hex> CF_ISSUER_SKI=<发卡方SKI大写> \
     https_proxy=http://127.0.0.1:10809 python3 pki/cf_edge_setup.py
+
+  CF_ZONE_ID：CF 域名概览页右下角 Zone ID；CF_ISSUER_SKI：发卡证书的
+  Authority Key Identifier（大写）。二者无内置默认值——真实值不入库，
+  一律经 env 传入，缺失时报用法并退出（非零）。
 
 做两件事：
   1. http_request_late_transform（Request Header Transform）：ops 域名逐请求
@@ -25,10 +30,11 @@ import sys
 import urllib.request
 
 TOKEN = os.environ.get("CF_RULES_TOKEN", "")
-ZONE = os.environ.get("CF_ZONE_ID", "3c681cb3e32fb42f0fb9ddd38dfa858f")
+# 真实值不入库：zone id 与发卡方 SKI 无默认值，必填 env，缺失即退出（见 main）。
+ZONE = os.environ.get("CF_ZONE_ID", "")
 HOSTS = [h.strip() for h in os.environ.get(
     "OPS_DOMAINS", "ops.yinghuoren.com").split(",") if h.strip()]
-ISSUER_SKI = os.environ.get("CF_ISSUER_SKI", "F275E69E4459913F80F4D9A36BA5AE9129C721C6")
+ISSUER_SKI = os.environ.get("CF_ISSUER_SKI", "")
 
 TRANSFORM_DESC = "ops-cert-passthrough"
 WAF_DESC = "ops-mtls-required"
@@ -117,9 +123,27 @@ def ensure_hostname_associations():
     return False
 
 
+def die_missing_env():
+    """必填 env 缺失：打印用法并以非零退出（真实值不入库，无内置默认）。"""
+    missing = [k for k, v in (("CF_RULES_TOKEN", TOKEN),
+                              ("CF_ZONE_ID", ZONE),
+                              ("CF_ISSUER_SKI", ISSUER_SKI)) if not v]
+    print(f"!! 缺少必填环境变量：{', '.join(missing)}", file=sys.stderr)
+    print("用法：", file=sys.stderr)
+    print("  CF_RULES_TOKEN=<token> CF_ZONE_ID=<32位hex> CF_ISSUER_SKI=<发卡方SKI大写> \\",
+          file=sys.stderr)
+    print("    python3 pki/cf_edge_setup.py", file=sys.stderr)
+    print("  CF_ZONE_ID：CF 域名概览页右下角 Zone ID；CF_ISSUER_SKI：发卡证书的",
+          file=sys.stderr)
+    print("  Authority Key Identifier（大写，小写会误拦有效证书）。", file=sys.stderr)
+    sys.exit(2)
+
+
 def main():
-    if not TOKEN:
-        sys.exit("need CF_RULES_TOKEN env")
+    if not TOKEN or not ZONE or not ISSUER_SKI:
+        die_missing_env()
+    if ISSUER_SKI != ISSUER_SKI.upper():
+        sys.exit("CF_ISSUER_SKI 必须大写（CF 官方格式；小写会导致有效证书被误拦）")
     ensure_hostname_associations()
     ok = ensure_rule("http_request_late_transform", TRANSFORM_DESC, {
         "action": "rewrite",

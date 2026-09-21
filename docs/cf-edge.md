@@ -60,8 +60,9 @@ ops 域名全部路径（含 `/api/portal-agent/*`）在边缘强制 mTLS。机�
 ## 日常运维
 
 - **token 白名单**：`cf_account_token` 已设 IP 白名单，仅可在服务器上调用 CF API；
-  规则变更/重建须 SSH 到服务器执行（token 经 stdin 传入，不落盘）：
-  `ssh workwork-server "cd ~/ops-portal && CF_RULES_TOKEN=\$(cat) python3 pki/cf_edge_setup.py" < ~/cf_token_and_cert/cf_account_token`
+  规则变更/重建须 SSH 到服务器执行（token 经 stdin 传入，不落盘；zone id 与
+  发卡方 SKI 无内置默认值，以 env 传入，缺失时脚本报用法退出）：
+  `ssh workwork-server "cd ~/ops-portal && CF_RULES_TOKEN=\$(cat) CF_ZONE_ID=<32位hex> CF_ISSUER_SKI=<发卡方SKI大写> python3 pki/cf_edge_setup.py" < ~/cf_token_and_cert/cf_account_token`
 - 新设备：openssl 生成 CSR → API 签发（或面板 Add Certificate）→ portal 证书页登记 → 装证 → p12 按规范归档 `~/cf_token_and_cert/ops.yinghuoren.com/`（命名：用途_持有人-设备）。
 - 吊销：CF 面板 Revoke（或 API 删除）+ portal 证书页置 revoked + 归档目录移除/标记对应 p12。
 - 轮换记录：初代证书 `cert-mbpro-01`（serial `26B7…`）因私钥失效已双端吊销，

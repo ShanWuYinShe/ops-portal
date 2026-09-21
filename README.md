@@ -35,10 +35,15 @@ DEPLOY_ENV=prod ./scripts/deploy.sh  # 生产（叠加 docker-compose.prod.yml�
 `UI_VERSION`/`IMAGE_TAG` 均由脚本按当前 git 自动注入；`UI_VERSION` 显示在
 侧栏底部 `build <sha>`，用于核对线上实际运行的版本；回滚见脚本输出。
 
-生产前置（`docker-compose.prod.yml`，缺一项 `up` 即失败）：
+生产前置（`docker-compose.prod.yml`，缺一项 `up` 即失败；
+`DEPLOY_ENV=prod ./scripts/deploy.sh` 预检会逐项兜底并给出修复指引）：
 
-- `.env` 按 `.env.prod.example` 配置；
+- `.env` 按 `.env.prod.example` 配置（`DEV_ALLOW_NO_CERT` 必须留空——
+  该开关打开即无证请求按 admin 放行，是认证链单点总闸）；
 - `cert/` 放 Cloudflare Origin CA 源站证书 `server_cert.pem` / `server_cert.key`；
+- `data/` 运行数据目录属主为 uid/gid 1001（backend 容器以 `1001:1001` 运行；
+  root 建出的目录会让首次启动 MkdirAll 失败、容器 crash loop）：
+  `install -d -o 1001 -g 1001 data`；
 - 外部网络 `ipvlan_docker` 已存在（ipvlan L3 公网 IPv6 直连；宿主 443 归
   workwork xray-forward，portal 不再发布宿主端口）。
 

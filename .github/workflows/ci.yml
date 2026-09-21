@@ -315,6 +315,26 @@ jobs:
         if: always()
         run: docker rm -f nginx-smoke agent-smoke || true
 
+  # 轻量静态门禁：三套 compose 编排必须可解析（变量默认值/覆盖关系、prod 的
+  # external 网络声明等只有 compose config 才暴露），全部 shell 脚本过 shellcheck。
+  # 部署脚本与编排文件是「全新生产部署首次启动」的入口，语法/引用错误在
+  # 服务器上才爆的，全部前置到这里（ubuntu-24.04 runner 自带 shellcheck 与 docker）。
+  repo-lint:
+    name: Repo lint (compose config & shellcheck)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: docker compose config -q (base / +prod / +profile dev)
+        run: |
+          docker compose -f docker-compose.yml config -q
+          docker compose -f docker-compose.yml -f docker-compose.prod.yml config -q
+          docker compose -f docker-compose.yml --profile dev config -q
+
+      - name: shellcheck (scripts/ and pki/ *.sh)
+        run: shellcheck scripts/*.sh pki/*.sh
+
   # 秘密泄漏门禁：扫全量 git 历史（配置与 workwork 同款：默认规则集 +
   # 项目级豁免在 .gitleaks.toml；历史已甄别发现按指纹记 .gitleaksignore）。
   gitleaks:
