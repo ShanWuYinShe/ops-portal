@@ -43,3 +43,6 @@ portal-agent-compose.generated.yml
 e2e/node_modules/
 e2e/test-results/
 e2e/playwright-report/
+
+# portal-agent 逐机 token 落盘文件（portal-agent-compose.yml 只读挂载进容器）
+agent-token

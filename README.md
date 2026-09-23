@@ -43,7 +43,9 @@ DEPLOY_ENV=prod ./scripts/deploy.sh  # 生产（叠加 docker-compose.prod.yml�
   `docker-compose.prod.yml` 双闸门兜底）；
 - `.env` 的 `PORTAL_AGENT_TOKEN` 必须留空（只认逐机签发的 agent token）；
   填值即回退无身份绑定的 legacy 共享 token，预检拦截，确要临时保留须
-  `ALLOW_LEGACY_AGENT_TOKEN=1` 显式确认；
+  `ALLOW_LEGACY_AGENT_TOKEN=1` 显式确认。被管机 agent 自己的 token 传值
+  不走本变量：portal-agent-compose.yml 侧以 0600 落盘文件 `agent-token`
+  提供（已 gitignore）；
 - `cert/` 放 Cloudflare Origin CA 源站证书 `server_cert.pem` / `server_cert.key`；
 - `data/` 运行数据目录属主为 uid/gid 1001（backend 容器以 `1001:1001` 运行；
   root 建出的目录会让首次启动 MkdirAll 失败、容器 crash loop）：

@@ -2,7 +2,8 @@
 # workwork/hotspot/ops-portal 为 compose 项目（容器 + git + deploy）；
 # travel 为纯静态站，无 compose 项目，仅上报 git 版本（无容器、无 deploy）。
 # 独立 compose，与 portal 主文件分离，避免循环依赖。
-# 用法：PORTAL_AGENT_TOKEN=... docker compose -f portal-agent-compose.yml up -d --build
+# 用法：先把逐机 token 写入仓库根 agent-token（0600，属主 1001:1001，
+# 见 volumes 注释），然后 docker compose -f portal-agent-compose.yml up -d --build
 # 注意：站点目录同路径挂载（源 == 目标），deploy 解析才一致。
 
 services:
@@ -45,7 +46,11 @@ services:
     environment:
       - TZ=Asia/Shanghai
       - PORTAL_AGENT_ID=agent-server-01
-      - PORTAL_AGENT_TOKEN=${PORTAL_AGENT_TOKEN:?PORTAL_AGENT_TOKEN required}
+      # token 走 0600 落盘文件（./agent-token，属主 1001:1001），不经 env 直传：
+      # 主 .env 的 PORTAL_AGENT_TOKEN 是 backend legacy 回退开关（须留空禁用），
+      # agent 传值与它共用变量名会让「传值」被误当「开回退」，且 env 进
+      # /proc 可见，文件 + 只读单文件挂载更收敛。
+      - PORTAL_AGENT_TOKEN_FILE=/run/portal-agent/token
       - PORTAL_URL=http://portal-backend:8319
       - PORTAL_AGENT_COMPOSE_PROJECTS=workwork,hotspot,ops-portal
       - PORTAL_AGENT_SITES=workwork:/home/workuser/workwork,hotspot:/home/workuser/hotspot,ops-portal:/home/workuser/ops-portal,travel:/home/workuser/travel
@@ -53,6 +58,11 @@ services:
       - HEARTBEAT_INTERVAL=10s
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      # 前置：仓库根 ./agent-token 必须已存在（0600，属主 1001:1001）——
+      # bind 挂载源不存在时 docker 会建出 root 目录，agent 读 token 失败。
+      # 写入：printf %s <token> > agent-token && chmod 600 agent-token
+      #   && chown 1001:1001 agent-token（.gitignore 已忽略该文件）。
+      - ./agent-token:/run/portal-agent/token:ro
       - /home/workuser/workwork:/home/workuser/workwork:ro
       - /home/workuser/hotspot:/home/workuser/hotspot:ro
       - /home/workuser/ops-portal:/home/workuser/ops-portal:ro

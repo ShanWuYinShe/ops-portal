@@ -120,9 +120,10 @@ if [ "$DEPLOY_ENV" = "prod" ]; then
   if [ -n "${PORTAL_AGENT_TOKEN:-}" ] || [ -n "$env_legacy" ]; then
     if [ "${ALLOW_LEGACY_AGENT_TOKEN:-}" != "1" ]; then
       pre_fail "PORTAL_AGENT_TOKEN 非空（shell=$([ -n "${PORTAL_AGENT_TOKEN:-}" ] && echo '<已设置>' || echo '<未设>')，.env=$([ -n "$env_legacy" ] && echo '<已设置>' || echo '<空>')）。legacy 共享 token 无 agent 身份绑定，双因子认证退化为单因子。"
-      echo "   修复：迁移为逐机 token（管理页「机器凭据」签发 + 各 agent 配置），" >&2
-      echo "   .env 中置 PORTAL_AGENT_TOKEN=（留空）后重跑；确要临时保留 legacy，" >&2
-      echo "   以 ALLOW_LEGACY_AGENT_TOKEN=1 重跑本脚本显式确认。" >&2
+      echo "   修复：迁移为逐机 token（管理页「机器凭据」签发），agent 传值走" >&2
+      echo "   portal-agent-compose.yml 的 0600 落盘文件 agent-token（勿填本变量——" >&2
+      echo "   它是 backend 的 legacy 回退开关），.env 置 PORTAL_AGENT_TOKEN= 后重跑；" >&2
+      echo "   确要临时保留 legacy，以 ALLOW_LEGACY_AGENT_TOKEN=1 重跑本脚本显式确认。" >&2
     fi
   fi
 
