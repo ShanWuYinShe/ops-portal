@@ -247,13 +247,18 @@ func apiSiteRegister(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "site name mismatch with certificate")
 		return
 	}
-	entry := siteEntry{Name: name, OpsURL: strings.TrimSpace(body.OpsURL),
+	opsURL, err := validateProbeURL(body.OpsURL)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	entry := siteEntry{Name: name, OpsURL: opsURL,
 		CertSerial: c.Serial, RegisteredAt: time.Now().UTC().Format(time.RFC3339)}
 	if err := upsertSiteEntry(entry); err != nil {
 		writeInternalError(w, err)
 		return
 	}
-	audit("site:"+name, c.Serial, "site.register", body.OpsURL, "ok", "", clientIP(r))
+	audit("site:"+name, c.Serial, "site.register", opsURL, "ok", "", clientIP(r))
 	writeOK(w, map[string]any{"site": name, "registered": true})
 }
 

@@ -39,7 +39,9 @@ server {
     ssl_session_tickets off;
     ssl_session_timeout 4h;
 
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    # HSTS 值与 Cloudflare 边缘下发的一致（15552000 = 180 天）：正常流量
+    # 浏览器只看到边缘头，此头为直连/边缘配置漂移时的兜底，取同值避免歧义。
+    add_header Strict-Transport-Security "max-age=15552000; includeSubDomains" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-Frame-Options "DENY" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;

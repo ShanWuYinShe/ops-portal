@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -47,6 +48,31 @@ func apiCertsAdd(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.TrimSpace(c.Label) == "" || strings.TrimSpace(c.Serial) == "" {
 		writeError(w, http.StatusBadRequest, "label and serial required")
+		return
+	}
+	// kind 归一 + 枚举校验：门禁与机器/站点身份都按 kind 分域，乱值入 库
+	// 会让 users 绑定、enroll 校验等分支出现解释歧义。
+	if c.Kind = strings.TrimSpace(c.Kind); c.Kind == "" {
+		c.Kind = "human"
+	}
+	if !validCertKinds[c.Kind] {
+		writeError(w, http.StatusBadRequest, "kind 必须是 human/portal-agent/service/site")
+		return
+	}
+	// serial/指纹是门禁匹配键，必须 hex（指纹可缺省）；去空格防抄录带空格。
+	c.Serial = strings.ToUpper(strings.TrimSpace(c.Serial))
+	c.Fingerprint = strings.ToLower(strings.TrimSpace(c.Fingerprint))
+	if !isHexStr(c.Serial) || !isHexStr(c.Fingerprint) {
+		writeError(w, http.StatusBadRequest, "serial/fingerprint 必须是 hex 串")
+		return
+	}
+	// 同 serial/指纹的 active 证书已存在即拒绝：重复登记无意义且让
+	// findActiveCert 的命中结果产生歧义（NOCASE 大小写视为相同）。
+	if dupe, err := activeCertDupe(c.Serial, c.Fingerprint); err != nil {
+		writeInternalError(w, err)
+		return
+	} else if dupe {
+		writeError(w, http.StatusConflict, "相同 serial 或指纹的 active 证书已存在")
 		return
 	}
 	if c.ID == "" {
@@ -310,8 +336,12 @@ func apiAuditList(w http.ResponseWriter, r *http.Request) {
 	if !mustMethod(w, r, http.MethodGet) {
 		return
 	}
-	entries := readAuditTail(200)
-	writeOK(w, map[string]any{"entries": entries})
+	// limit 可选（1..1000），缺省 200；越界/非法值回退默认（readAuditTail 再兜底）。
+	n := 200
+	if v, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && v >= 1 && v <= 1000 {
+		n = v
+	}
+	writeOK(w, map[string]any{"entries": readAuditTail(n)})
 }
 
 // POST /api/portal/backup（admin）—— 在线备份数据库快照到 data/backups/。

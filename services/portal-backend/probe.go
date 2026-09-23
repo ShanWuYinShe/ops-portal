@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -55,16 +56,24 @@ func probeInterval() time.Duration {
 }
 
 // serviceHTTPClient 出示 service 证书的出网 client（被管网站放行清单钉死其 serial）。
+// 拨测目标来自站点自报的 ops_url，必须过 SSRF 防线：dial 时刻以真实目标 IP
+// 判定（probeDialControl，防 rebinding）；不跟随重定向（重定向目标同样
+// 不可信，302 一律按原响应状态处理 → 非 2xx 即不可达）。
 func serviceHTTPClient() (*http.Client, error) {
 	ensureServiceKeyPEM()
 	cert, err := tls.LoadX509KeyPair(servicePemPath(), serviceKeyPath())
 	if err != nil {
 		return nil, err
 	}
+	dialer := &net.Dialer{Timeout: 10 * time.Second, Control: probeDialControl}
 	return &http.Client{
 		Timeout: 10 * time.Second,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{Certificates: []tls.Certificate{cert}},
+			DialContext:     dialer.DialContext,
+		},
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
 		},
 	}, nil
 }

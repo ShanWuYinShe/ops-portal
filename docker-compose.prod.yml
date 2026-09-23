@@ -6,6 +6,13 @@
 # ipvlan_docker 网络与 data/ 属主等清单见 README「生产前置」。
 
 services:
+  portal-backend:
+    environment:
+      # 运行期硬闸门：无论 shell/.env 传什么值，prod 叠加一律置空该开关
+      # （compose 多文件按 key 合并、后者覆盖）。该开关打开即无证请求按
+      # ops.admin 放行，与 deploy.sh 预检构成双闸门。
+      - DEV_ALLOW_NO_CERT=
+
   portal-nginx:
     environment:
       - OPS_DOMAIN=${OPS_DOMAIN:-ops.yinghuoren.com}

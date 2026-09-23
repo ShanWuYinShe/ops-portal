@@ -108,6 +108,10 @@ ops 子树是跑在独立子域名上的**基础设施契约**，消费者和目
 
 - portal 后台每 `OPS_PROBE_INTERVAL`（默认 60s，最小 5s）以 service 证书
   拨测所有登记了 `ops_url` 的站点。
+- `ops_url` SSRF 防线：仅接受 http/https、不允许 userinfo；注册时拒绝
+  解析到环回/私网/链路本地地址的 host，拨测建连时再按真实目标 IP 复核
+  （防 DNS rebinding），且不跟随重定向。纯内网自托管部署可用
+  `OPS_PROBE_ALLOW_PRIVATE=1` 放开（生产必须留空）。
 - 判定：非 2xx → 不可达；2xx → 可达，且 `status`/`checks` 原样进视图：
   `ok` 绿灯，`degraded`/`starting` 黄灯并列出故障项，`ok:false` 红灯。
 - service 证书未签发时整轮跳过；探测只记日志不记审计（防刷屏）。

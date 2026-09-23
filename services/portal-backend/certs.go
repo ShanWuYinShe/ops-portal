@@ -90,6 +90,39 @@ func listCerts() []certRecord {
 	return out
 }
 
+// validCertKinds 证书 kind 枚举：登记面（certs/register）只收这四种。
+// 空串在 API 层按 human 处理（schema 默认值的历史语义）。
+var validCertKinds = map[string]bool{"human": true, "portal-agent": true, "service": true, "site": true}
+
+// isHexStr 空 = 合法（fingerprint 允许缺省），非空必须是 hex（serial/指纹
+// 都是 CF 返回的 hex 串；大小写皆可，门禁查表走 NOCASE）。
+func isHexStr(s string) bool {
+	if s == "" {
+		return true
+	}
+	for _, r := range s {
+		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f' || r >= 'A' && r <= 'F') {
+			return false
+		}
+	}
+	return true
+}
+
+// activeCertDupe active 证书是否已有相同 serial 或指纹（NOCASE 对齐
+// findActiveCert 的大小写不敏感命中语义）。重复登记会让门禁命中歧义。
+func activeCertDupe(serial, fingerprint string) (bool, error) {
+	db, err := getDB()
+	if err != nil {
+		return false, err
+	}
+	var n int
+	err = db.QueryRow(`SELECT COUNT(*) FROM certs WHERE status='active' AND (
+		(serial <> '' AND serial = ? COLLATE NOCASE) OR
+		(fingerprint <> '' AND fingerprint = ? COLLATE NOCASE))`,
+		serial, fingerprint).Scan(&n)
+	return n > 0, err
+}
+
 func addCert(c certRecord) (*certRecord, error) {
 	db, err := getDB()
 	if err != nil {

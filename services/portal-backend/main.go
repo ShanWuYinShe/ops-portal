@@ -176,6 +176,9 @@ func requireAgentTokenV2(next http.HandlerFunc) http.HandlerFunc {
 		agentID, ok := validAgentToken(got)
 		if !ok {
 			if want := strings.TrimSpace(getEnv("PORTAL_AGENT_TOKEN", "")); want != "" && constantTimeEqual(got, want) {
+				// legacy 共享 token 无 agent 身份绑定（bound 置空 = 心跳身份不比对），
+				// 任何持 token 者可冒充任意 agent：每次使用都高声留痕，推动迁移。
+				log.Printf("portal: WARNING: legacy shared PORTAL_AGENT_TOKEN used from %s (no agent identity binding); migrate to per-agent tokens", clientIP(r))
 				agentID, ok = "legacy", true
 			}
 		}

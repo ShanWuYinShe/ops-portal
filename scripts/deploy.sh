@@ -112,6 +112,20 @@ if [ "$DEPLOY_ENV" = "prod" ]; then
     fi
   fi
 
+  # 5) legacy 共享 agent token：无 agent 身份绑定（持 token 者可冒充任意
+  #    agent 收命令/回传结果），双因子退化为单因子。生产必须迁移为
+  #    agent-tokens 逐机签发；确要带 legacy 上线须显式 ALLOW_LEGACY_AGENT_TOKEN=1。
+  env_legacy="$(grep -E '^[[:space:]]*(export[[:space:]]+)?PORTAL_AGENT_TOKEN=' .env 2>/dev/null \
+    | tail -n 1 | cut -d= -f2- | tr -d '\r"[:space:]' || true)"
+  if [ -n "${PORTAL_AGENT_TOKEN:-}" ] || [ -n "$env_legacy" ]; then
+    if [ "${ALLOW_LEGACY_AGENT_TOKEN:-}" != "1" ]; then
+      pre_fail "PORTAL_AGENT_TOKEN 非空（shell=$([ -n "${PORTAL_AGENT_TOKEN:-}" ] && echo '<已设置>' || echo '<未设>')，.env=$([ -n "$env_legacy" ] && echo '<已设置>' || echo '<空>')）。legacy 共享 token 无 agent 身份绑定，双因子认证退化为单因子。"
+      echo "   修复：迁移为逐机 token（管理页「机器凭据」签发 + 各 agent 配置），" >&2
+      echo "   .env 中置 PORTAL_AGENT_TOKEN=（留空）后重跑；确要临时保留 legacy，" >&2
+      echo "   以 ALLOW_LEGACY_AGENT_TOKEN=1 重跑本脚本显式确认。" >&2
+    fi
+  fi
+
   if [ -n "$precheck_failed" ]; then
     echo "!! prod 预检未通过，中止部署（逐项修复后重跑）。" >&2
     exit 1
