@@ -17,5 +17,12 @@
 {:else if site.reachable === false}
 	<span class="badge bg-err-soft text-err" title="portal 拨测失败，检查接口与放行清单">不可达</span>
 {:else}
-	<span class="badge" title="尚未拨测（等 service 证书签发后的下一轮）">未探测</span>
+	<span
+		class="badge"
+		title={site.ops_url
+			? '已注册 ops_url 但尚未拨测（等 service 证书签发后的下一轮）'
+			: 'agent 发现的站点，未注册 ops_url，不参与拨测'}
+	>
+		{site.ops_url ? '未探测' : '未接入拨测'}
+	</span>
 {/if}
