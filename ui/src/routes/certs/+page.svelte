@@ -23,6 +23,24 @@
 	});
 
 	const isAdmin = $derived(roleLevel(portal.whoami?.role) >= 3);
+	// 用途列按 kind 细分并给出与主机/站点的对应关系——label 语义由 kind 决定：
+	// portal-agent 的 label 即 portal_agent_id（机器身份绑定键，不可改名）；
+	// site 的 label 即站点名；service 是 portal 自身拨测/ops 调用身份；human 才是自由命名。
+	const certUsage = (c: CertRecord): { chip: string; detail: string } => {
+		switch (c.kind) {
+			case 'portal-agent':
+				return { chip: 'agent 主机', detail: `被管主机 ${c.label}` };
+			case 'site':
+				return { chip: '站点', detail: `被管网站 ${c.label} · 仅可访问 /api/site/*` };
+			case 'service':
+				return { chip: 'portal 服务', detail: 'portal 拨测 / ops 调用身份' };
+			default:
+				return { chip: '人用', detail: '登录管理站的设备' };
+		}
+	};
+	// portal-agent 证书与心跳 join：不在心跳列表 = 该主机未接入 agent
+	const agentOnline = (id: string): boolean | undefined =>
+		portal.agents.find((a) => a.portal_agent_id === id)?.online;
 	// 角色的展示名：角色值本身是机器格式（ops.*），界面配中文权限说明
 	const roleLabel = (role: string) =>
 		({ 'ops.viewer': 'ops.viewer · 只读', 'ops.operator': 'ops.operator · 可操作', 'ops.admin': 'ops.admin · 管理员' })[role] ?? role;
@@ -279,7 +297,16 @@
 								{#if c.note}<div class="text-xs text-ink-muted">{c.note}</div>{/if}
 							{/if}
 						</td>
-					<td><span class="chip">{c.kind === 'human' ? '人用' : '机器用'}</span></td>
+					<td>
+						<span class="chip">{certUsage(c).chip}</span>
+						{#if c.kind === 'portal-agent'}
+							{@const st = agentOnline(c.label)}
+							<span class="badge ml-1 {badgeCls(st === undefined ? '' : st ? 'ok' : 'err')}">
+								{st === undefined ? '未接入' : st ? '在线' : '离线'}
+							</span>
+						{/if}
+						<div class="text-xs text-ink-muted">{certUsage(c).detail}</div>
+					</td>
 					<td class="font-mono text-ink-2" title={c.fingerprint}>{c.serial.slice(0, 18)}…</td>
 					<td>
 						<span class="badge {badgeCls(c.status === 'active' ? 'ok' : '')}">{c.status}</span>

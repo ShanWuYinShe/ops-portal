@@ -10,6 +10,11 @@
 	const containers = $derived(portal.agents.flatMap((a) => a.heartbeat?.containers ?? []));
 	const running = $derived(containers.filter((c) => c.state === 'running'));
 	const sitesWithRuntime = $derived(portal.sites.filter((s) => s.containers.length > 0));
+
+	// 主机徽标 hover 补充真实主机名：多台 agent 同 id 命名风格时（agent-server-01…）
+	// 仅靠 id 无法对应到具体机器，hostname 提供第二标识。
+	const agentHostname = (id: string) =>
+		portal.agents.find((a) => a.portal_agent_id === id)?.heartbeat?.hostname;
 </script>
 
 <div class="mb-4.5">
@@ -66,11 +71,17 @@
 					<tr>
 						<td class="w-px whitespace-nowrap">
 							<a class="hover:text-primary" href="/sites"><b>{s.name}</b></a>
+							{#if s.ops_url}<div class="text-xs text-ink-muted">{s.ops_url}</div>{/if}
 						</td>
 						<td><SiteHealthBadge site={s} /></td>
 						<td>
 							{#each s.agents as a (a.portal_agent_id)}
-								<span class="badge mr-1 {badgeCls(a.online ? 'ok' : 'err')}">{a.portal_agent_id}</span>
+								<span
+									class="badge mr-1 {badgeCls(a.online ? 'ok' : 'err')}"
+									title={agentHostname(a.portal_agent_id) || ''}
+								>
+									{a.portal_agent_id}
+								</span>
 							{/each}
 						</td>
 						<td class="text-ink-2">
@@ -80,8 +91,18 @@
 						</td>
 						<td class="text-right">
 							{#each s.git as g (g.portal_agent_id + g.name)}
-								<span class="font-mono text-[12.5px] text-ink-2">
+								<span
+									class="font-mono text-[12.5px] text-ink-2"
+									title="{g.path} · {g.branch}@{g.head}"
+								>
 									<span class="badge mr-1 {badgeCls(g.dirty ? 'warn' : 'ok')}">{g.branch}</span>@{g.head?.slice(0, 10)}
+								</span>
+							{:else}
+								<span
+									class="text-xs text-ink-muted"
+									title="agent 未上报该站 git 版本：检查被管机 PORTAL_AGENT_SITES 里该站路径是否为 git checkout 且 agent（uid 1001）可读；采集失败的条目会被静默跳过"
+								>
+									未上报 git
 								</span>
 							{/each}
 						</td>
