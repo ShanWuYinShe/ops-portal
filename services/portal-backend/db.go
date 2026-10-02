@@ -97,6 +97,71 @@ CREATE TABLE IF NOT EXISTS audit (
 -- audit.id 是 INTEGER PRIMARY KEY（rowid 别名）自带索引；旧版误建的显式
 -- idx_audit_id 只增写放大，清理掉。
 DROP INDEX IF EXISTS idx_audit_id;
+-- webhook 网关（设计见 .workwork/plan/webhook-design.md）：接收端点 → 转发规则 →
+-- 入站投递记录 → 出站尝试。secret 明文落库（管理面经 requireRole 保护，UI 打码展示）。
+CREATE TABLE IF NOT EXISTS webhook_endpoints (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL DEFAULT '',
+  slug TEXT NOT NULL UNIQUE,
+  secret TEXT NOT NULL DEFAULT '',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  note TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT '',
+  created_by TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS webhook_sources (
+  id TEXT PRIMARY KEY,
+  endpoint_id TEXT NOT NULL DEFAULT '',
+  name TEXT NOT NULL DEFAULT '',
+  target_url TEXT NOT NULL DEFAULT '',
+  secret TEXT NOT NULL DEFAULT '',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  max_attempts INTEGER NOT NULL DEFAULT 3,
+  timeout_ms INTEGER NOT NULL DEFAULT 10000,
+  created_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_webhook_sources_endpoint ON webhook_sources(endpoint_id);
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+  id TEXT PRIMARY KEY,
+  endpoint_id TEXT NOT NULL DEFAULT '',
+  slug TEXT NOT NULL DEFAULT '',
+  received_at TEXT NOT NULL DEFAULT '',
+  remote_ip TEXT NOT NULL DEFAULT '',
+  method TEXT NOT NULL DEFAULT '',
+  content_type TEXT NOT NULL DEFAULT '',
+  headers TEXT NOT NULL DEFAULT '{}',
+  body TEXT NOT NULL DEFAULT '',
+  body_bytes INTEGER NOT NULL DEFAULT 0,
+  sig_ok INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'pending',
+  reject_reason TEXT NOT NULL DEFAULT '',
+  event_type TEXT NOT NULL DEFAULT '',
+  dedup_key TEXT NOT NULL DEFAULT ''
+);
+-- 投递查询按 status 过滤 + 按 endpoint 时间倒序分页，两条路径各配索引；
+-- dedup_key 用于幂等去重（同一 X-Webhook-Delivery 只落一条）。
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_status ON webhook_deliveries(status);
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_endpoint_time ON webhook_deliveries(endpoint_id, received_at);
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_dedup ON webhook_deliveries(dedup_key);
+-- 幂等去重必须防并发双写：无 dedup_key 的投递（空串）不参与唯一性，
+-- 故用 partial unique index，而非把 (endpoint_id,dedup_key) 建成普通唯一约束。
+-- 有了它，重复投递即使并发也只会有一条记录落库（另一条走 INSERT 冲突 → 返回既有 id）。
+CREATE UNIQUE INDEX IF NOT EXISTS idx_webhook_deliveries_dedup_uniq
+  ON webhook_deliveries(endpoint_id, dedup_key) WHERE dedup_key <> '';
+CREATE TABLE IF NOT EXISTS webhook_attempts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  delivery_id TEXT NOT NULL DEFAULT '',
+  source_id TEXT NOT NULL DEFAULT '',
+  attempt_no INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT '',
+  http_status INTEGER NOT NULL DEFAULT 0,
+  error TEXT NOT NULL DEFAULT '',
+  duration_ms INTEGER NOT NULL DEFAULT 0,
+  request_body TEXT NOT NULL DEFAULT '',
+  response_body TEXT NOT NULL DEFAULT '',
+  at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_webhook_attempts_delivery ON webhook_attempts(delivery_id);
 `
 
 func dbPath() string { return dataDir() + "/portal.db" }

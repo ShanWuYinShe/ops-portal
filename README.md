@@ -12,6 +12,12 @@ portal 永不直连被管机。详见 `docs/cf-edge.md`。
 （`GET /api/portal/sites`），UI 一律按网站分组展示与操作，详见
 `docs/portal-agent-protocol.md` 的「统一网站视图」。
 
+**Webhook 网关**：接收第三方回调（GitHub/Stripe/CI 等）——按 per-endpoint secret
+校验 HMAC 签名入站落库，再按规则转发到内部目标，失败退避重试，全量投递日志可查可重放
+（`ui` 的「站点管理 → Webhook」页）。接收端点是 portal 上唯一不套证书门禁的路径
+（`POST /api/hooks/{slug}`，靠签名认证），管理接口沿用证书门禁 + RBAC，
+转发目标过 SSRF 校验。详见 `docs/webhook.md`。
+
 ## 本地联调
 
 ```bash
@@ -70,8 +76,9 @@ docker rm -f e2e
 | 路径 | 说明 |
 |---|---|
 | `services/portal-nginx/` | 源站网关：Origin Pulls + X-Cert-* 透传 |
-| `services/portal-backend/` | Go 门禁 + portal-agent 心跳 + 前端托管 |
+| `services/portal-backend/` | Go 门禁 + portal-agent 心跳 + webhook 网关 + 前端托管 |
 | `services/portal-agent/` | Go 边车：docker 列表 + git 版本 + 心跳外连 |
-| `ui/` | Svelte 5 管理台（仪表盘 / 站点与服务 / 命令与发布 / 用户与设备 / 机器凭据 / 审计） |
+| `ui/` | Svelte 5 管理台（仪表盘 / 站点与服务 / Webhook / 命令与发布 / 用户与设备 / 机器凭据 / 审计） |
+| `docs/webhook.md` | Webhook 网关：数据模型 / 接收端点签名 / 管理 API / 转发与重试 |
 | `docs/cf-edge.md` | CF 边缘配置清单 |
 | `pki/` | dev 自签脚本（永不用于生产）；`cf_edge_setup.py` 生产边缘 mTLS 规则自动化（CF Transform Rules 注入 X-Cert-\* 透传头 + 可选 WAF 拦截无证请求，幂等可重跑，见脚本 docstring） |

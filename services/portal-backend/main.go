@@ -266,6 +266,22 @@ func main() {
 	mux.HandleFunc("POST /api/portal-agent/heartbeat", requireAgentTokenV2(apiAgentHeartbeat))
 	mux.HandleFunc("POST /api/portal-agent/report", requireAgentTokenV2(apiAgentReport))
 
+	// webhook：入站接收（第三方回调，无证书鉴权，靠 per-endpoint secret 的 HMAC 校验）
+	// 与管理面（沿用 requireRole 门禁）。注意 /api/hooks/{slug} 不套 requireCert——
+	// 它由公网第三方调用，没有 mTLS 客户端证书。
+	mux.HandleFunc("POST /api/hooks/{slug}", apiWebhookReceive)
+	mux.HandleFunc("GET /api/portal/webhooks/endpoints", requireRole("ops.viewer", apiWebhookEndpointsList))
+	mux.HandleFunc("POST /api/portal/webhooks/endpoints/upsert", requireRole("ops.admin", apiWebhookEndpointsUpsert))
+	mux.HandleFunc("POST /api/portal/webhooks/endpoints/remove", requireRole("ops.admin", apiWebhookEndpointsRemove))
+	mux.HandleFunc("POST /api/portal/webhooks/endpoints/rotate-secret", requireRole("ops.admin", apiWebhookEndpointsRotate))
+	mux.HandleFunc("GET /api/portal/webhooks/sources", requireRole("ops.viewer", apiWebhookSourcesList))
+	mux.HandleFunc("POST /api/portal/webhooks/sources/upsert", requireRole("ops.admin", apiWebhookSourcesUpsert))
+	mux.HandleFunc("POST /api/portal/webhooks/sources/remove", requireRole("ops.admin", apiWebhookSourcesRemove))
+	mux.HandleFunc("GET /api/portal/webhooks/deliveries", requireRole("ops.viewer", apiWebhookDeliveriesList))
+	mux.HandleFunc("GET /api/portal/webhooks/deliveries/get", requireRole("ops.viewer", apiWebhookDeliveriesGet))
+	mux.HandleFunc("POST /api/portal/webhooks/deliveries/replay", requireRole("ops.operator", apiWebhookDeliveriesReplay))
+	mux.HandleFunc("GET /api/portal/webhooks/stats", requireRole("ops.viewer", apiWebhookStats))
+
 	// 前端 SPA（SvelteKit adapter-static 产物，Docker 构建时拷到 /app/ui）。
 	// 文件存在则直出，未知路径回退 index.html（客户端路由 /dashboard 等）。
 	// 注意：未知 /api/ 路径不能回退 index.html（会 200 返回 HTML，前端把
@@ -305,6 +321,8 @@ func main() {
 	startAgentWatchdog()
 	// 审计保留期按天兜底清理（启动时已清一次；不常备份的部署也保生效）。
 	startRetentionLoop()
+	// webhook 出站转发 worker：扫描 pending 投递，按退避策略重试。
+	startWebhookDispatcher()
 	log.Printf("ops-portal backend listening on :%s", port)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)

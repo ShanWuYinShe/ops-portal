@@ -7,7 +7,8 @@
 		TerminalSquare,
 		Users,
 		KeyRound,
-		History
+		History,
+		Webhook
 	} from '@lucide/svelte';
 	import Overlays from '$lib/Overlays.svelte';
 	import { loadPortal, portal, roleLevel } from '$lib/state.svelte';
@@ -21,6 +22,7 @@
 		{ group: '站点管理' },
 		{ href: '/sites', label: '站点与服务', icon: Server },
 		{ href: '/ops', label: '命令与发布', icon: TerminalSquare },
+		{ href: '/webhooks', label: 'Webhook', icon: Webhook },
 		{ group: '访问控制', adminOnly: true },
 		{ href: '/certs', label: '用户与设备', icon: Users, adminOnly: true },
 		{ href: '/tokens', label: '机器凭据', icon: KeyRound, adminOnly: true },
