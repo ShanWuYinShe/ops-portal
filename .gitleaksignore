@@ -1,0 +1,6 @@
+# gitleaks 历史发现豁免（指纹不含秘密内容，格式见 .gitleaks.toml 头注释）。
+# 以下 2 条是 webhook_api_test.go 里的假测试密钥 whsec_abcd1234（已甄别为误报：
+# 测试断言打码逻辑用的字面量，非真实凭证）；该值在后续提交已改为不带厂商前缀
+# 的 fake-test-abcd1234，但 git 历史不可改写，故按指纹豁免。2026-10-03 甄别。
+0c683a23de95deedbbd7ba7f6113900f9c825a2a:services/portal-backend/webhook_api_test.go:generic-api-key:147
+0c683a23de95deedbbd7ba7f6113900f9c825a2a:services/portal-backend/webhook_api_test.go:generic-api-key:172

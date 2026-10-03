@@ -144,7 +144,8 @@ func TestWebhookEndpointsUpsertValidation(t *testing.T) {
 	}
 
 	rr := postJSON(t, mux, "/api/portal/webhooks/endpoints/upsert",
-		`{"name":"GitHub","slug":"github-main","secret":"whsec_abcd1234","enabled":true,"note":"n"}`)
+		// 假密钥不带 whsec_/sk_ 等真实厂商前缀，避免 gitleaks generic-api-key 误报（CI 红灯）
+		`{"name":"GitHub","slug":"github-main","secret":"fake-test-abcd1234","enabled":true,"note":"n"}`)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("valid upsert = %d, want 200 (body=%s)", rr.Code, rr.Body.String())
 	}
@@ -169,7 +170,7 @@ func TestWebhookEndpointsUpsertValidation(t *testing.T) {
 	if !got.OK || len(got.Endpoints) != 1 {
 		t.Fatalf("list response = %s", grr.Body.String())
 	}
-	if got.Endpoints[0].Secret == "whsec_abcd1234" {
+	if got.Endpoints[0].Secret == "fake-test-abcd1234" {
 		t.Fatal("list endpoint must not return the plaintext secret")
 	}
 	if !strings.Contains(got.Endpoints[0].Secret, "****") {
