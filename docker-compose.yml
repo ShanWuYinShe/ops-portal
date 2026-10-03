@@ -61,6 +61,8 @@ services:
       - ALERT_COOLDOWN=${ALERT_COOLDOWN:-}
       # webhook 转发扫描周期（docs/webhook.md；空串由 getEnv 回退 5s）
       - WEBHOOK_DISPATCH_INTERVAL=${WEBHOOK_DISPATCH_INTERVAL:-}
+      # webhook 投递保留天数（docs/webhook.md；空串由 getEnv 回退 30）
+      - WEBHOOK_RETENTION_DAYS=${WEBHOOK_RETENTION_DAYS:-}
     volumes:
       # 运行期数据（portal.db/备份/service 私钥）挂仓库根 ./data：
       # .workwork/ 是 AI 中间产物目录（按约定可整体清理），不能放生产数据。

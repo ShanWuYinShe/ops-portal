@@ -213,6 +213,7 @@ func main() {
 		log.Fatalf("portal: open db failed: %v", err)
 	}
 	purgeOldAudit()
+	purgeOldWebhooks()
 	// dev 免证开关一旦误入生产等于管理面全开（无证按 ops.admin 放行），
 	// 启动即高声提示，让日志里看得见。
 	if getEnv("DEV_ALLOW_NO_CERT", "") != "" {

@@ -65,8 +65,10 @@
 
 - 删除端点（`endpoints/remove`）在事务内**级联删其 sources**；该端点的
   `deliveries` / `attempts` **保留**作历史排障记录。
-- webhook 数据**不参与** `AUDIT_RETENTION_DAYS` 的审计清理（那是 `audit` 表），
-  当前无自动裁剪——投递量大时需人工按 `received_at` 归档。
+- webhook 数据有**独立的保留期** `WEBHOOK_RETENTION_DAYS`（默认 **30 天**，
+  比审计的 180 天短：这里是排障用途的大体积原文，非合规留痕）。启动、备份前与
+  每日循环各清一次，过期投递连同其 attempts 在同一事务内删除。
+  设为负数或非法值回退 30。
 
 ## 接收端点（公网，无证书鉴权）
 
@@ -229,6 +231,7 @@ POST /api/hooks/{slug}
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `WEBHOOK_DISPATCH_INTERVAL` | `5s` | 转发 worker 扫描 `pending` 投递的周期；解析失败或 < 1s 时回退 5s |
+| `WEBHOOK_RETENTION_DAYS` | `30` | 投递与 attempts 的保留天数；启动、备份前与每日循环各清一次；非法/非正值回退 30 |
 | `OPS_PROBE_ALLOW_PRIVATE` | 空（关闭） | 复用项：置非空同时放开拨测与 webhook 转发的私网目标限制 |
 
 **除上面两项外没有其它 webhook 环境变量**：

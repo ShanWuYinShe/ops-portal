@@ -569,14 +569,15 @@ func purgeOldAudit() {
 	}
 }
 
-// startRetentionLoop 每天按保留期清理一次审计。purgeOldAudit 原本只在
-// 启动与备份前执行，长期不重启也不备份的部署会一直不清理。
+// startRetentionLoop 每天按保留期清理一次审计与 webhook 投递。purgeOldAudit
+// 原本只在启动与备份前执行，长期不重启也不备份的部署会一直不清理。
 func startRetentionLoop() {
 	go func() {
 		t := time.NewTicker(24 * time.Hour)
 		defer t.Stop()
 		for range t.C {
 			purgeOldAudit()
+			purgeOldWebhooks()
 		}
 	}()
 }
@@ -588,6 +589,7 @@ func backupDB() (string, error) {
 		return "", err
 	}
 	purgeOldAudit()
+	purgeOldWebhooks()
 	dir := dataDir() + "/backups"
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return "", err
