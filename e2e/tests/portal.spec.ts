@@ -31,7 +31,9 @@ test('登记设备证书表单闭环', async ({ page }) => {
 	await page.getByRole('button', { name: '登记设备证书' }).click();
 	// getByLabel 依赖 label/for 关联（a11y 修复的回归测试）
 	await page.getByLabel('名称（持有人-设备）*').fill(label);
-	await page.getByLabel('证书序列号 Serial *').fill(`PW${Date.now()}`);
+	// serial 是门禁匹配键，后端校验必须为 hex 串（api.go isHexStr）；
+	// 此前用 PW 前缀被 400 拒掉，登记失败导致本用例与审计用例双红。
+	await page.getByLabel('证书序列号 Serial *').fill(`AB${Date.now()}`);
 	await page.getByRole('button', { name: '保存', exact: true }).click();
 	await expect(page.getByText(`已登记 ${label}`)).toBeVisible();
 	await expect(page.getByRole('cell', { name: label })).toBeVisible();
