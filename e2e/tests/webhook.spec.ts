@@ -193,3 +193,42 @@ test('webhook 端点列表密钥打码，不泄露明文', async ({ request }) =
 test('webhook body 上限常量与后端一致（256KB）', () => {
 	expect(WEBHOOK_BODY_LIMIT).toBe(262144);
 });
+
+// ── UI 层（真实浏览器）：此前只有 API 用例，页面 DOM/表单/轮询无回归保护 ──
+
+test('webhook 管理台 UI：建端点 → 密钥打码 → 签名回调出现在投递列表', async ({ page, request }) => {
+	test.setTimeout(90_000); // 页面 10s 轮询 + dispatcher 5s 扫描，给足余量
+	const slug = `ui-${Date.now()}`;
+	// 密钥每次运行唯一：容器数据集跨用例共享，固定字面量会产生两条相同打码行，
+	// getByText 触发 strict mode violation
+	const secret = `ui-e2e-secret-${Date.now()}`;
+	// 与后端 maskSecret 同构：首4位 + 定长8个* + 尾4位（改算法时此处失败提醒同步）
+	const masked = secret.slice(0, 4) + '********' + secret.slice(-4);
+	await page.goto('/webhooks');
+
+	// 表单 label 与 input 经 for/id 关联（a11y），getByLabel 精确匹配全文案
+	await page.getByLabel('名称', { exact: true }).fill(`UI e2e ${slug}`);
+	await page.getByLabel('slug（接收路径，全局唯一）').fill(slug);
+	await page.getByLabel('密钥（留空 = 不验签，仅受信代理可调用）').fill(secret);
+	await page.getByRole('button', { name: '创建端点' }).click();
+	await expect(page.getByText('端点已创建')).toBeVisible();
+
+	// 表格行出现；密钥只以打码形式展示（首尾各4位+中间定长8个*），明文不得出现
+	await expect(page.getByText(`slug: ${slug}`)).toBeVisible();
+	await expect(page.getByText(masked)).toBeVisible();
+	await expect(page.getByText(secret)).toHaveCount(0);
+
+	// 用 UI 里刚填的密钥发签名回调：202 后投递行出现，并最终被 worker 判为
+	//「已送达」（无启用规则 → 送达完毕，留 reject_reason=no enabled source）
+	const body = JSON.stringify({ type: 'ui-e2e', at: slug });
+	const res = await request.post(`/api/hooks/${slug}`, {
+		headers: { 'Content-Type': 'application/json', 'X-Webhook-Signature': sign(secret, body) },
+		data: body
+	});
+	expect(res.status(), await res.text()).toBe(202);
+
+	const row = page.getByRole('row', { name: new RegExp(slug) });
+	await expect(row).toBeVisible({ timeout: 25_000 });
+	await expect(row.getByText('已送达')).toBeVisible({ timeout: 30_000 });
+});
+
