@@ -559,9 +559,11 @@ func webhookSlugFromPath(r *http.Request) string {
 	return strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/hooks/"), "/")
 }
 
-// apiWebhookReceive 公网入站接收：无证书鉴权，靠 per-endpoint secret 的 HMAC 校验。
+// apiWebhookReceive 入站接收：调用方须持登记证书过 requireCert（注册处见
+// main.go；消费方仅限自建站点），端点可另配 per-endpoint secret 的 HMAC 签名。
 // 流程：查端点 → 读体（256KB 上限）→ 验签 → 幂等去重 → 落库 → 202。
-// 端点未配置 secret 时仅接受受信代理来源（否则拒绝——未配密钥的公网端点等于裸奔）。
+// 端点未配置 secret 时仅接受受信代理来源（requireCert 之外的第二道纵深，
+// 防「持有效证书的调用方向未配密钥的端点灌数据」）。
 func apiWebhookReceive(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")

@@ -1,7 +1,8 @@
 # Webhook 网关
 
-接收第三方回调（GitHub / Stripe / CI 等），签名校验 → 落库留痕 → 按规则转发到内部
-目标 → 失败重试 → 全量投递日志，管理台可查询与重放。
+接收**本 portal 管理的自建站点**推送的运维事件（hotspot 巡检/备份告警、workwork
+备份/部署通知等），可选签名校验 → 落库留痕 → 按规则转发到通知目标 → 失败重试 →
+全量投递日志，管理台可查询与重放。调用方统一持登记证书过边缘 mTLS。
 
 与 portal 其余部分**同进程、同 SQLite、同 compose**：并入现有
 `services/portal-backend` 容器（不新增容器、不新增端口），管理接口沿用现有证书门禁
@@ -70,14 +71,17 @@
   每日循环各清一次，过期投递连同其 attempts 在同一事务内删除。
   设为负数或非法值回退 30。
 
-## 接收端点（公网，无证书鉴权）
+## 接收端点（仅限持登记证书的自建站点）
 
 ```
 POST /api/hooks/{slug}
 ```
 
-这是 portal 上**唯一不套 `requireCert` 的业务路径**：第三方回调方没有 portal 证书，
-靠 per-endpoint secret 的 HMAC 校验认证。端点必须 `enabled=1`，否则按不存在处理。
+消费方仅限本 portal 管理的自建站点（hotspot 巡检/备份告警、workwork 备份/部署
+通知等），调用方**必须持 portal 登记的有效客户端证书**：与其他业务路径一致套
+`requireCert`（边缘 mTLS + 本地证书库双层，无免证路径）。端点可另配
+per-endpoint secret 的 HMAC 签名作第二层加固（可选）。端点必须 `enabled=1`，
+否则按不存在处理。
 
 ### 请求头
 
@@ -107,7 +111,9 @@ POST /api/hooks/{slug}
 |---|---|---|
 | `202` | 已受理（响应体 `dedup: false`） | `{"ok":true,"delivery_id":"wh-dlv-…","accepted":true,"dedup":false}` |
 | `200` | 幂等命中（`dedup: true`，不新建记录、不重复转发） | `{"ok":true,"delivery_id":"<既有 id>","accepted":true,"dedup":true}` |
+| `401` | 未持证书（`requireCert`：边缘 `X-Cert-Verify` 非 true） | `{"ok":false,"error":"client certificate required"}` |
 | `401` | 签名缺失/不匹配/时间戳超窗 | `{"ok":false,"error":"invalid signature"}` |
+| `403` | 证书未登记/已吊销，或来源非受信代理 | `{"ok":false,"error":"certificate not authorized"}` 等 |
 | `404` | 端点不存在或 `enabled=0` | `{"ok":false,"error":"endpoint not found"}` |
 | `405` | 非 POST | `{"ok":false,"error":"method not allowed"}` |
 | `413` | body 超 256KB（`http.MaxBytesReader`，整条拒收**不落库**） | `{"ok":false,"error":"payload too large"}` |
@@ -118,10 +124,11 @@ POST /api/hooks/{slug}
 
 ### 未配置 secret 的端点
 
-端点的 `secret` 为空时**不校验签名**，改为只接受来自受信代理
-（`TRUSTED_PROXY_CIDRS` / `TRUSTED_PROXY_HOSTS`，见 `trustedproxy.go`）的请求；
-其余来源一律 `401`。这是防止「未配密钥的公网端点等于裸奔」的兜底——
-生产端点必须配 secret。
+端点的 `secret` 为空时**不校验签名**（门禁已由 `requireCert` 兜底，持登记证书
+方可到达），此层仅再要求请求来自受信代理（`TRUSTED_PROXY_CIDRS` /
+`TRUSTED_PROXY_HOSTS`，见 `trustedproxy.go`），其余来源一律 `401`——纵深防御，
+防「持有效证书的调用方向未配密钥的端点灌数据」。端点配 secret 即启用第二层
+HMAC 校验（推荐对多来源端点使用）。
 
 ### body 上限
 
@@ -255,5 +262,6 @@ POST /api/hooks/{slug}
   在「审计」页按 action 前缀筛选。
 - **投递不通怎么查**：管理台投递详情看 `reject_reason` 与逐次 attempt 的
   `http_status` / `error` / `response_body`；`failed` 的改完目标后点重放即可重试。
-- **第三方接不上**：先确认端点 `enabled=1`、`slug` 与 URL 一致、
+- **调用方接不上**：先确认推送方持有效登记证书（无证在边缘即 403，到不了
+  源站）；再确认端点 `enabled=1`、`slug` 与 URL 一致、
   签名串是否含时间戳（带了 `X-Webhook-Timestamp` 就必须按 `<ts>.` + body 签）。

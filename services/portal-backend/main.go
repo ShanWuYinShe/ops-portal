@@ -267,10 +267,10 @@ func main() {
 	mux.HandleFunc("POST /api/portal-agent/heartbeat", requireAgentTokenV2(apiAgentHeartbeat))
 	mux.HandleFunc("POST /api/portal-agent/report", requireAgentTokenV2(apiAgentReport))
 
-	// webhook：入站接收（第三方回调，无证书鉴权，靠 per-endpoint secret 的 HMAC 校验）
-	// 与管理面（沿用 requireRole 门禁）。注意 /api/hooks/{slug} 不套 requireCert——
-	// 它由公网第三方调用，没有 mTLS 客户端证书。
-	mux.HandleFunc("POST /api/hooks/{slug}", apiWebhookReceive)
+	// webhook：入站接收与管理面均沿用证书门禁。消费方仅限本 portal 管理的
+	// 自建站点（持有登记证书），/api/hooks/{slug} 与其他业务路径一致套
+	// requireCert；端点可另配 per-endpoint secret 的 HMAC 签名作第二层加固。
+	mux.HandleFunc("POST /api/hooks/{slug}", requireCert(apiWebhookReceive))
 	mux.HandleFunc("GET /api/portal/webhooks/endpoints", requireRole("ops.viewer", apiWebhookEndpointsList))
 	mux.HandleFunc("POST /api/portal/webhooks/endpoints/upsert", requireRole("ops.admin", apiWebhookEndpointsUpsert))
 	mux.HandleFunc("POST /api/portal/webhooks/endpoints/remove", requireRole("ops.admin", apiWebhookEndpointsRemove))

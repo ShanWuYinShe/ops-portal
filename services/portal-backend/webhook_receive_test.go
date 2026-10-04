@@ -516,3 +516,40 @@ func TestWebhookDedupConcurrent(t *testing.T) {
 		t.Fatalf("concurrent dedup rows = %d, want 1", len(list))
 	}
 }
+
+// 门禁：/api/hooks/{slug} 与其他业务路径一致套 requireCert（消费方全部自建
+// 持证站点，无免证路径）。handler 层用例（上面各 Test）直接调 apiWebhookReceive，
+// 不含此门禁；这里在 requireCert 包裹层验证无证/有证行为。
+func TestWebhookReceiveRequiresCert(t *testing.T) {
+	t.Setenv("DATA_DIR", t.TempDir())
+	t.Setenv("DEV_ALLOW_NO_CERT", "")
+	seedCert(t, "cert-hook-gate", "hotspot-server")
+	seedEndpoint(t, "gated", "whsec_gated")
+
+	h := requireCert(apiWebhookReceive)
+	body := "{\"type\":\"push\"}"
+	newReq := func() *http.Request {
+		req := httptest.NewRequest(http.MethodPost, "/api/hooks/gated", strings.NewReader(body))
+		req.RemoteAddr = "127.0.0.1:5555" // 受信代理
+		req.Header.Set("Content-Type", "application/json")
+		return req
+	}
+
+	// 无证书头：边缘 verified 为假 → 401（到不了 handler）。
+	rec := httptest.NewRecorder()
+	h(rec, newReq())
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("no cert = %d, want 401 (%s)", rec.Code, rec.Body.String())
+	}
+
+	// 证书在表 + verified=true：过门禁，签名也匹配 → 202。
+	req := newReq()
+	req.Header.Set(certVerifyHeader, "true")
+	req.Header.Set(certSerialHeader, "S-cert-hook-gate")
+	req.Header.Set("X-Webhook-Signature", signWebhook("whsec_gated", "", []byte(body)))
+	rec2 := httptest.NewRecorder()
+	h(rec2, req)
+	if rec2.Code != http.StatusAccepted {
+		t.Fatalf("with valid cert = %d, want 202 (%s)", rec2.Code, rec2.Body.String())
+	}
+}
