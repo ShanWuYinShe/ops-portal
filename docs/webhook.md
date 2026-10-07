@@ -246,7 +246,10 @@ HMAC 校验（推荐对多来源端点使用）。
 - body 上限 256KB 是代码常量（`webhookMaxBody`）；
 - `max_attempts`（默认 3）与 `timeout_ms`（默认 10000）是 **per-source 数据库字段**，
   在管理台按规则配置，不是全局环境变量；
-- 退避档位 5s/30s/2m/10m/30m 是代码常量（`backoffForAttempt`）。
+- 退避档位 5s/30s/2m/10m/30m 是代码常量（`backoffForAttempt`）；
+- 门户**自身告警**的出站渠道（`ALERT_WEBHOOK_URL` / `ALERT_WEBHOOK_SECRET`）属于
+  告警引擎而非本模块（不经投递落库/重试/重放），见 `docs/portal-agent-protocol.md`
+  「心跳超时告警」。
 
 > ⚠️ 文档与代码一致性的核对方式：`grep -rn 'getEnv(' services/portal-backend/*.go`
 > 是唯一权威——凡是代码没有 `getEnv` 读取的键，本节就不写。

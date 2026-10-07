@@ -2,8 +2,8 @@ package main
 
 // 告警引擎：状态跃迁（agent 掉线/恢复、拨测不可达/恢复/降级）统一走
 // emitAlert：写审计（action = "alert."+kind，随审计保留期清理）+ 通知渠道。
-// 渠道未配置（senderFromEnv 返回 nil）时只记录不发送；接入 Telegram/SMTP
-// 等渠道时实现 alertSender 并在 senderFromEnv 里按 env 返回即可。
+// 渠道由 senderFromEnv 按 env 构造（当前为出站 webhook，见 alertwebhook.go），
+// 未配置时只记录不发送；接入 Telegram/SMTP 时实现 alertSender 并在此返回即可。
 
 import (
 	"log"
@@ -17,9 +17,9 @@ type alertSender interface {
 	Send(kind, subject, detail string) error
 }
 
-// senderFromEnv 按环境变量构造渠道；未配置返回 nil（只记录）。
-// 渠道接入点：在此新增分支返回对应实现。
-func senderFromEnv() alertSender { return nil }
+// senderFromEnv 按环境变量构造通知渠道；未配置返回 nil（只记录）。
+// 渠道接入点：在此新增分支返回对应实现（当前唯一实现见 alertwebhook.go）。
+func senderFromEnv() alertSender { return webhookAlertSenderFromEnv() }
 
 var alertState = struct {
 	sync.Mutex
@@ -52,10 +52,15 @@ func emitAlert(now time.Time, kind, subject, detail string) {
 	alertState.Unlock()
 
 	audit("portal", "", "alert."+kind, subject, "ok", detail, "")
+	// 异步发送：告警由看门狗（10s tick）与拨测循环（默认 60s）触发，出站渠道
+	// 最慢可占满 alertWebhookTimeout；同步发送会拖住这两个循环，与「Send 的
+	// 错误只记日志，不影响引擎运转」的契约不符。冷却窗口已限制并发量。
 	if sender != nil {
-		if err := sender.Send(kind, subject, detail); err != nil {
-			log.Printf("alert: send %s/%s failed: %v", kind, subject, err)
-		}
+		go func() {
+			if err := sender.Send(kind, subject, detail); err != nil {
+				log.Printf("alert: send %s/%s failed: %v", kind, subject, err)
+			}
+		}()
 	}
 }
 

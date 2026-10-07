@@ -59,6 +59,10 @@ services:
       - OPS_PROBE_ALLOW_PRIVATE=${OPS_PROBE_ALLOW_PRIVATE:-}
       - AGENT_OFFLINE_AFTER=${AGENT_OFFLINE_AFTER:-}
       - ALERT_COOLDOWN=${ALERT_COOLDOWN:-}
+      # 门户自身告警的出站渠道（docs/portal-agent-protocol.md「心跳超时告警」；
+      # 留空 = 只写审计与日志不外发）
+      - ALERT_WEBHOOK_URL=${ALERT_WEBHOOK_URL:-}
+      - ALERT_WEBHOOK_SECRET=${ALERT_WEBHOOK_SECRET:-}
       # webhook 转发扫描周期（docs/webhook.md；空串由 getEnv 回退 5s）
       - WEBHOOK_DISPATCH_INTERVAL=${WEBHOOK_DISPATCH_INTERVAL:-}
       # webhook 投递保留天数（docs/webhook.md；空串由 getEnv 回退 30）

@@ -12,11 +12,11 @@ portal 永不直连被管机。详见 `docs/cf-edge.md`。
 （`GET /api/portal/sites`），UI 一律按网站分组展示与操作，详见
 `docs/portal-agent-protocol.md` 的「统一网站视图」。
 
-**Webhook 网关**：接收第三方回调（GitHub/Stripe/CI 等）——按 per-endpoint secret
-校验 HMAC 签名入站落库，再按规则转发到内部目标，失败退避重试，全量投递日志可查可重放
-（`ui` 的「站点管理 → Webhook」页）。接收端点是 portal 上唯一不套证书门禁的路径
-（`POST /api/hooks/{slug}`，靠签名认证），管理接口沿用证书门禁 + RBAC，
-转发目标过 SSRF 校验。详见 `docs/webhook.md`。
+**Webhook 网关**：接收本 portal 管理的自建站点推送的运维事件（hotspot 巡检/备份告警、
+workwork 备份/部署通知等）——入站与其余业务路径一致套证书门禁（消费方须持登记证书过
+边缘 mTLS），端点可选 per-endpoint secret 的 HMAC 作第二层；落库留痕后按规则转发到内部
+目标，失败退避重试，全量投递日志可查可重放（`ui` 的「站点管理 → Webhook」页）。
+管理接口沿用证书门禁 + RBAC，转发目标过 SSRF 校验。详见 `docs/webhook.md`。
 
 ## 本地联调
 

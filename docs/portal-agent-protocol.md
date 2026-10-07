@@ -174,8 +174,12 @@ portal-agent 侧双重白名单：`PORTAL_AGENT_COMPOSE_PROJECTS`（项目）+ `
 - 所有告警写审计（action = `alert.*`，随审计保留期清理）；同一
   kind+subject 在 `ALERT_COOLDOWN`（默认 30m）内不重复。
 - backend 重启后第一轮只建基线，不补发历史跃迁（防重启风暴）。
-- 通知渠道（Telegram/SMTP 等）按 env 接入（`alerts.go senderFromEnv`），
-  未配置时只记录不发送。
+- 通知渠道：配 `ALERT_WEBHOOK_URL`（接收 POST JSON `{event,subject,detail,text,time}`）
+  即把告警外发到 IM 机器人/自建接收器；`text` 为一行人类可读文案（兼容只认文本的机器人）。
+  可选 `ALERT_WEBHOOK_SECRET` 对 body 做 HMAC-SHA256（头 `X-Webhook-Signature: sha256=<hex>`，
+  与 webhook 网关出站转发同格式，接收方可复用同一份校验）。
+  目标过 SSRF 校验（私网默认拒绝，逃生阀同为 `OPS_PROBE_ALLOW_PRIVATE`）；
+  未配置时只记录不发送，发送失败只记日志（重复抑制由上面的冷却窗口负责）。
 
 ## deploy 路径语义（关键，踩过坑）
 
