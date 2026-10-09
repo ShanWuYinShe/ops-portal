@@ -21,7 +21,9 @@ description: ops-portal webhook 网关的定位、门禁、消费方接入与机
 | 站点 | 场景 | 状态 |
 |---|---|---|
 | hotspot | 巡检/备份告警（crontab ALERT_WEBHOOK 前缀） | ✅ 2026-10-04 实测 202 |
-| workwork | backup.sh / deploy-changed.sh 失败通知 + admin Go 事件 | 🟨 patch 就绪待合入（`ops-portal/.workwork/workwork-alert-webhook-mtls.patch`，副本内全量验证通过，打干净基线 `git apply --check` 通过） |
+| workwork | backup.sh / deploy-changed.sh 失败通知 + admin Go 事件 | ✅ 已合入（fe20e09）并于 2026-10-10 部署：`deploy-changed.sh 9e51ffd` 复跑模式重建 admin（v1.1.0-67-g59601ab 指纹核对通过）；backup.sh 真实 failure 事件实测 delivered（当时脚本有 tar file-changed 误报缺陷，修复 patch 见下） |
+
+- **已知遗留（2026-10-10）**：workwork `scripts/backup.sh` 对 `.wework` 运行时目录归档时 GNU tar 常以 rc=1（file changed）退出，被 EXIT trap 误报 backup.failure。修复分支 `fix/backup-tar-file-changed`（patch: `ops-portal/.workwork/workwork-backup-tar-file-changed.patch`，rc=1 降级为警告、rc>=2 才算失败，桩 tar 双分支实测）待合入 workwork 仓库后服务器 pull 即生效。
 
 - 端点：slug=`alerts`（id wh-ep-7b84acb8）；脚本侧证书默认 `~/.webhook-caller/{cert,key}.pem`，
   可用 `ALERT_MTLS_CERT/KEY` 覆盖；证书文件缺失时回退无证（兼容钉钉/飞书直推）。
