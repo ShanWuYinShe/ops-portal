@@ -1,5 +1,7 @@
-# 服务器 agent（被管机侧）：上报 workwork/hotspot/ops-portal/travel。
+# 服务器 agent（被管机侧）：上报 workwork/hotspot/ops-portal/music_player/media_center/travel。
 # workwork/hotspot/ops-portal 为 compose 项目（容器 + git + deploy）；
+# music_player/media_center 的 compose 编排在仓库 deploy/ 子目录（DEPLOY_DIRS 指 deploy/，
+# deploy 命令形态 -f <dir>/docker-compose.yml 要求 dir 为含 compose 文件的目录）；
 # travel 为纯静态站，无 compose 项目，仅上报 git 版本（无容器、无 deploy）。
 # 独立 compose，与 portal 主文件分离，避免循环依赖。
 # 用法：先把逐机 token 写入仓库根 agent-token（0600，属主 1001:1001，
@@ -52,9 +54,11 @@ services:
       # /proc 可见，文件 + 只读单文件挂载更收敛。
       - PORTAL_AGENT_TOKEN_FILE=/run/portal-agent/token
       - PORTAL_URL=http://portal-backend:8319
-      - PORTAL_AGENT_COMPOSE_PROJECTS=workwork,hotspot,ops-portal
-      - PORTAL_AGENT_SITES=workwork:/home/workuser/workwork,hotspot:/home/workuser/hotspot,ops-portal:/home/workuser/ops-portal,travel:/home/workuser/travel
-      - PORTAL_AGENT_DEPLOY_DIRS=workwork:/home/workuser/workwork,hotspot:/home/workuser/hotspot,ops-portal:/home/workuser/ops-portal
+      - PORTAL_AGENT_COMPOSE_PROJECTS=workwork,hotspot,ops-portal,music_player,media_center
+      - PORTAL_AGENT_SITES=workwork:/home/workuser/workwork,hotspot:/home/workuser/hotspot,ops-portal:/home/workuser/ops-portal,music_player:/home/workuser/music_player,media_center:/home/workuser/media_center,travel:/home/workuser/travel
+      # music_player/media_center 的 deploy 目录为仓库内 deploy/ 子目录（容器标签
+      # com.docker.compose.project.working_dir 已核实指向该处，2026-10-10）。
+      - PORTAL_AGENT_DEPLOY_DIRS=workwork:/home/workuser/workwork,hotspot:/home/workuser/hotspot,ops-portal:/home/workuser/ops-portal,music_player:/home/workuser/music_player/deploy,media_center:/home/workuser/media_center/deploy
       - HEARTBEAT_INTERVAL=10s
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -66,6 +70,10 @@ services:
       - /home/workuser/workwork:/home/workuser/workwork:ro
       - /home/workuser/hotspot:/home/workuser/hotspot:ro
       - /home/workuser/ops-portal:/home/workuser/ops-portal:ro
+      # music_player/media_center 为 compose 项目（容器 + git + deploy）；仓库根只读
+      # 挂载已覆盖其 deploy/ 子目录，无需单独挂载。
+      - /home/workuser/music_player:/home/workuser/music_player:ro
+      - /home/workuser/media_center:/home/workuser/media_center:ro
       # travel 仅 git 上报（只读挂载源码即可，无 deploy 不需要写权限）。
       # 前置：服务器 /home/workuser/travel 须已是 git checkout（先 clone 再 up，
       # 否则 docker 会建出 root 空目录导致后续 checkout 权限问题）。
