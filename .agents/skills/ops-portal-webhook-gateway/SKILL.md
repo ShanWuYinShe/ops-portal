@@ -21,9 +21,9 @@ description: ops-portal webhook 网关的定位、门禁、消费方接入与机
 | 站点 | 场景 | 状态 |
 |---|---|---|
 | hotspot | 巡检/备份告警（crontab ALERT_WEBHOOK 前缀） | ✅ 2026-10-04 实测 202 |
-| workwork | backup.sh / deploy-changed.sh 失败通知 + admin Go 事件 | ✅ 已合入（fe20e09）并于 2026-10-10 部署：`deploy-changed.sh 9e51ffd` 复跑模式重建 admin（v1.1.0-67-g59601ab 指纹核对通过）；backup.sh 真实 failure 事件实测 delivered（当时脚本有 tar file-changed 误报缺陷，修复 patch 见下） |
+| workwork | backup.sh / deploy-changed.sh 失败通知 + admin Go 事件 | ✅ 已合入（fe20e09）并于 2026-10-10 部署：`deploy-changed.sh 9e51ffd` 复跑模式重建 admin（v1.1.0-67-g59601ab 指纹核对通过）；backup.sh 真实 failure 事件实测 delivered。同日修复其 tar file-changed 误报缺陷并合入（workwork 9bb7f1a，见下） |
 
-- **已知遗留（2026-10-10）**：workwork `scripts/backup.sh` 对 `.wework` 运行时目录归档时 GNU tar 常以 rc=1（file changed）退出，被 EXIT trap 误报 backup.failure。修复分支 `fix/backup-tar-file-changed`（patch: `ops-portal/.workwork/workwork-backup-tar-file-changed.patch`，rc=1 降级为警告、rc>=2 才算失败，桩 tar 双分支实测）待合入 workwork 仓库后服务器 pull 即生效。
+- **backup.sh 误报修复（2026-10-10 合入，workwork 9bb7f1a）**：`.wework` 运行时目录归档期间被写入时 GNU tar 以 rc=1（file changed）退出，EXIT trap 会把每次例行备份误报成 backup.failure。修复语义：rc=1（按读取时点快照，归档完整可用）降级为警告并继续，rc>=2 才算失败进入 missing。桩 tar 对 rc=1/rc=2 双分支实测；生产实测：合入当晚备份 RC=0、恢复验证通过、投递记录零新增（对比合入前同一脚本实测发出过误报）。教训：**给「退出码即告警」的脚本加 webhook 时，先区分工具的"警告级"退出码**。
 
 - 端点：slug=`alerts`（id wh-ep-7b84acb8）；脚本侧证书默认 `~/.webhook-caller/{cert,key}.pem`，
   可用 `ALERT_MTLS_CERT/KEY` 覆盖；证书文件缺失时回退无证（兼容钉钉/飞书直推）。
