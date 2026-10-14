@@ -1,3 +1,0 @@
-# bun 安装配置：固定国内镜像源（与全局约定一致，bun.lock 的 resolved URL 走镜像）。
-[install]
-registry = "https://registry.npmmirror.com"
