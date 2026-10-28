@@ -17,10 +17,10 @@ description: ops-portal webhook 网关的定位、门禁、消费方接入与机
 | 站点 | 场景 | 状态 |
 |---|---|---|
 | hotspot | 巡检/备份告警（crontab `ALERT_WEBHOOK` 前缀） | 已接入，实测 202 |
-| workwork | `backup.sh` / `deploy-changed.sh` 失败通知 + admin Go 事件 | 已合入（fe20e09）并部署（`deploy-changed.sh 9e51ffd` 复跑模式重建 admin，v1.1.0-67-g59601ab 指纹核对通过）；`backup.sh` 真实 failure 事件实测 delivered |
+| workwork | `backup.sh` / `deploy-changed.sh` 失败通知 + admin Go 事件 | 已合入并部署（`deploy-changed.sh` 复跑模式重建 admin，v1.1.0-67-g59601ab 指纹核对通过）；`backup.sh` 真实 failure 事件实测 delivered |
 
 - 端点：slug=`alerts`（id wh-ep-7b84acb8）；脚本侧证书默认 `~/.webhook-caller/{cert,key}.pem`，可用 `ALERT_MTLS_CERT/KEY` 覆盖；证书文件缺失时回退无证（兼容钉钉/飞书直推）。
-- `deploy-production.sh` 的 `ALERT_WEBHOOK` 在**部署机（Mac）**环境取值，服务器 crontab 管不到。
+- hotspot 的 `scripts/deploy-production.sh` 里 `ALERT_WEBHOOK` 在**部署机（Mac）**环境取值，服务器 crontab 管不到。
 
 ### backup.sh 退出码语义（rc=1 误报的修复，workwork 9bb7f1a）
 
@@ -39,7 +39,7 @@ description: ops-portal webhook 网关的定位、门禁、消费方接入与机
    **坑（实测 400 code 1462 "Failed to parse input CSR"）**：必须像 Go 版一样
    把 PEM 真实换行替换为字面反斜杠+n 后**手工拼 JSON 字符串**；若用 `json.dumps`，
    已替换的 `\n` 会被再转义一层导致 CF 解析 CSR 失败。
-3. portal 登记（持 admin 证书如 `~/.backup-caller` 调用）：
+3. portal 登记（路由为 `requireRole("ops.admin")`，持该角色证书如 `~/.backup-caller` 调用）：
    `POST /api/portal/certs/register`，body `{label,kind:"service",serial(大写),
    fingerprint(小写),cf_id,common_name,status:"active",expires_at,note}`。
 4. 证书产物落 `~/.webhook-caller/cert.pem`（0600）。
