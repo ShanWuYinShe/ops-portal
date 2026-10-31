@@ -20,7 +20,7 @@
 |---|---|---|
 | DNS AAAA → `::30` 橙云 | API | ✅ |
 | mTLS 主机关联（托管 CA） | `PUT .../certificate_authorities/hostname_associations` | ✅ |
-| 设备证书 `liyou-mbpro`（serial `197FE164…`，至 2028-12-16） | API 签发（CSR 本地生成），p12 归档 `~/cf_token_and_cert/ops.yinghuoren.com/` | ✅ |
+| 设备证书 `liyou-mbpro`（serial `197FE164…`，至 2028-12-16） | API 签发（CSR 本地生成），p12 归档 `~/work/dogod/cf_token_and_cert/ops.yinghuoren.com/` | ✅ |
 | 证书登记 + `liyou/ops.admin` 绑定 | portal 证书库（服务器 SQLite `portal.db`，见 docs/database.md；JSON 旧档已迁移为 `.migrated`） | ✅ |
 | Transform 透传规则 `ops-cert-passthrough` | API（phase `http_request_late_transform`，action `rewrite`，headers 为**对象**） | ✅ |
 | Origin Pulls + nginx `ssl_verify_client on` | zone 全局 + `ORIGIN_PULL_VERIFY=on` | ✅ |
@@ -62,8 +62,8 @@ ops 域名全部路径（含 `/api/portal-agent/*`）在边缘强制 mTLS。机�
 - **token 白名单**：`cf_account_token` 已设 IP 白名单，仅可在服务器上调用 CF API；
   规则变更/重建须 SSH 到服务器执行（token 经 stdin 传入，不落盘；zone id 与
   发卡方 SKI 无内置默认值，以 env 传入，缺失时脚本报用法退出）：
-  `ssh workwork-server "cd ~/ops-portal && CF_RULES_TOKEN=\$(cat) CF_ZONE_ID=<32位hex> CF_ISSUER_SKI=<发卡方SKI大写> python3 pki/cf_edge_setup.py" < ~/cf_token_and_cert/cf_account_token`
-- 新设备：openssl 生成 CSR → API 签发（或面板 Add Certificate）→ portal 证书页登记 → 装证 → p12 按规范归档 `~/cf_token_and_cert/ops.yinghuoren.com/`（命名：用途_持有人-设备）。
+  `ssh workwork-server "cd ~/ops-portal && CF_RULES_TOKEN=\$(cat) CF_ZONE_ID=<32位hex> CF_ISSUER_SKI=<发卡方SKI大写> python3 pki/cf_edge_setup.py" < ~/work/dogod/cf_token_and_cert/cf_account_token`
+- 新设备：openssl 生成 CSR → API 签发（或面板 Add Certificate）→ portal 证书页登记 → 装证 → p12 按规范归档 `~/work/dogod/cf_token_and_cert/ops.yinghuoren.com/`（命名：用途_持有人-设备）。
 - 吊销：CF 面板 Revoke（或 API 删除）+ portal 证书页置 revoked + 归档目录移除/标记对应 p12。
 - 轮换记录：初代证书 `cert-mbpro-01`（serial `26B7…`）因私钥失效已双端吊销，
   由 `cert-mbpro-02`（serial `197FE164…`）接替，users.json 绑定随之换绑。

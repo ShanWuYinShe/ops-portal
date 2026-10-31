@@ -27,3 +27,4 @@ cd ui && bun install && bun run check
 
 - 环境变量模板：`.env.example` / `.env.prod.example`（真实 `.env` 不入库）。
 - 边缘/数据库/协议细节见 `docs/`（cf-edge.md、database.md、ops-v1-spec.md、portal-agent-protocol.md）。
+- 告警 webhook 网关（签名校验、mTLS 调用方证书、去重与限流）：详见 skill `ops-portal-webhook-gateway`。

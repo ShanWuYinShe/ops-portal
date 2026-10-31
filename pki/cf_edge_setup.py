@@ -7,7 +7,7 @@ token 权限要求（cf_account_token 已满足 Transform 部分）：
     cf_account_token 无此权限，WAF 部分失败不影响透传）
 
 用法：
-  CF_RULES_TOKEN=$(cat ~/cf_token_and_cert/cf_account_token) \
+  CF_RULES_TOKEN=$(cat ~/work/dogod/cf_token_and_cert/cf_account_token) \
     CF_ZONE_ID=<32位hex> CF_ISSUER_SKI=<发卡方SKI大写> \
     https_proxy=http://127.0.0.1:10809 python3 pki/cf_edge_setup.py
 
