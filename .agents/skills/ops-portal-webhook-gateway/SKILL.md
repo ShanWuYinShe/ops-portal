@@ -8,7 +8,7 @@ description: ops-portal webhook 网关的定位、门禁、消费方接入与机
 ## 定位与门禁
 
 - 消费方**仅限本 portal 管理的自建站点**，全部可持登记证书；不存在无法持证的第三方。
-- `POST /api/hooks/{slug}` 与其他业务路径一致套 `requireCert`（commit 6632bde），边缘对全部路径强制 mTLS（cf-edge.md），**无免证路径**。
+- `POST /api/hooks/{slug}` 与其他业务路径一致套 `requireCert`，边缘对全部路径强制 mTLS（cf-edge.md），**无免证路径**。
 - 反模式：按「公网第三方回调」做成免证 + HMAC。真实消费方全部自建，门禁统一为 `requireCert`；HMAC secret 仅保留为可选第二层。
 - 端点未配 secret 时要求请求来自受信代理（经 nginx 即满足）；`reject_reason` 为 `no enabled source` 且 `status=delivered` = 只收不转发的正常态（无转发规则），需要转发到飞书/钉钉时在管理台给端点加 source 规则。
 
@@ -16,15 +16,15 @@ description: ops-portal webhook 网关的定位、门禁、消费方接入与机
 
 | 站点 | 场景 | 状态 |
 |---|---|---|
-| hotspot | 巡检/备份告警（crontab `ALERT_WEBHOOK` 前缀） | 已接入，实测 202 |
-| workwork | `backup.sh` / `deploy-changed.sh` 失败通知 + admin Go 事件 | 已合入并部署（`deploy-changed.sh` 复跑模式重建 admin，v1.1.0-67-g59601ab 指纹核对通过）；`backup.sh` 真实 failure 事件实测 delivered |
+| hotspot | 巡检/备份告警（crontab `ALERT_WEBHOOK` 前缀） | 已接入 |
+| workwork | `backup.sh` / `deploy-changed.sh` 失败通知 + admin Go 事件 | 已接入 |
 
 - 端点：slug=`alerts`（id wh-ep-7b84acb8）；脚本侧证书默认 `~/.webhook-caller/{cert,key}.pem`，可用 `ALERT_MTLS_CERT/KEY` 覆盖；证书文件缺失时回退无证（兼容钉钉/飞书直推）。
 - hotspot 的 `scripts/deploy-production.sh` 里 `ALERT_WEBHOOK` 在**部署机（Mac）**环境取值，服务器 crontab 管不到。
 
-### backup.sh 退出码语义（rc=1 按警告处理，workwork 9bb7f1a）
+### backup.sh 退出码语义（rc=1 按警告处理）
 
-`.wework` 运行时目录归档期间被写入时，GNU tar 以 rc=1（file changed）退出，EXIT trap 会把每次例行备份误报成 `backup.failure`。实现按 rc 分流：rc=1（按读取时点快照，归档完整可用）降级为警告并继续，rc>=2 才算失败进入 missing。验证方式：桩 tar 覆盖 rc=1/rc=2 双分支；生产环境备份 RC=0、恢复验证通过、投递记录零新增。
+`.wework` 运行时目录归档期间被写入时，GNU tar 以 rc=1（file changed）退出，EXIT trap 会把每次例行备份误报成 `backup.failure`。实现按 rc 分流：rc=1（按读取时点快照，归档完整可用）降级为警告并继续，rc>=2 才算失败进入 missing。验证方式：桩 tar 覆盖 rc=1/rc=2 双分支；生产判据：备份 RC=0、恢复验证通过、`webhook_deliveries` 无 `backup.failure` 新增。
 
 **注意**：给「退出码即告警」的脚本接 webhook 前，先区分工具的「警告级」退出码。
 
@@ -58,7 +58,7 @@ curl -s --cert ~/.backup-caller/cert.pem --key ~/.backup-caller/key.pem \
   'https://ops.yinghuoren.com/api/portal/webhooks/deliveries?limit=2'
 ```
 
-crontab 点亮方式：在命令前加 `ALERT_WEBHOOK="https://ops.yinghuoren.com/api/hooks/alerts" ` 前缀（已备份 `~/crontab.bak.webhook`）。
+crontab 点亮方式：在命令前加 `ALERT_WEBHOOK="https://ops.yinghuoren.com/api/hooks/alerts" ` 前缀（服务器备份：`~/crontab.bak.webhook`）。
 
 ## 门户自身告警的出站渠道
 
