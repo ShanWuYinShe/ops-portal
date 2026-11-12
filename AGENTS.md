@@ -45,7 +45,7 @@ cd ui && bun run test
   - `shellcheck scripts/*.sh pki/*.sh`（实测亚秒）
 - CI 覆盖（`.github/workflows/ci.yml`，push main 与 PR 均触发）：
   - `backend`（Portal Backend (Go)）：gofmt / go vet / staticcheck / go build / `go test -race` / govulncheck（阻断）
-  - `agent`（Portal Agent (Go)）：gofmt / go vet / staticcheck / go build / `go test -race` / govulncheck（非阻断，已知接受项 GO-2026-4887、GO-2026-4883）
+  - `agent`（Portal Agent (Go)）：gofmt / go vet / staticcheck / go build / `go test -race` / govulncheck（非阻断；已知接受项与原因见 `ci.yml` 该 job 的注释）
   - `opshttp`（opshttp (reference package)）：gofmt / go vet / staticcheck / go build / `go test -race` / govulncheck（阻断）
   - `ui`（Portal UI (SvelteKit)）：`bun install --frozen-lockfile` / svelte-check / vitest / build
   - `smoke`（Container smoke (backend image)）：docker build backend 镜像 → 起容器 → health、404/405、SPA 回退、CSP 契约断言
