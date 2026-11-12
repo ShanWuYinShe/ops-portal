@@ -61,7 +61,10 @@ DEPLOY_ENV=prod ./scripts/deploy.sh  # 生产（叠加 docker-compose.prod.yml�
 
 ## 测试
 
-单测/静态检查由 CI 门禁（Go 三 module + ui + smoke + e2e）；本地复现 e2e：
+单测/静态检查由 CI 门禁（Go 三 module + ui + smoke + e2e，见 `.github/workflows/ci.yml`）；
+本地日常只跑秒级静态检查（命令见 `AGENTS.md`「CI 门禁与本地验证分工」）。
+容器镜像构建、容器冒烟与 Playwright e2e 全部由 CI 覆盖，本地不做 `docker build`；
+仅排障时可按下方步骤本地复现（非提交前门禁）：
 
 ```bash
 docker build -t ops-portal-backend:e2e -f services/portal-backend/Dockerfile .
