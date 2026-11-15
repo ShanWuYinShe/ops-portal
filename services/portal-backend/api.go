@@ -252,11 +252,11 @@ func apiCommandsEnqueue(w http.ResponseWriter, r *http.Request) {
 		CreatedBy: u.Username,
 	})
 	if err != nil {
-		audit(u.Username, "", "commands.enqueue", body.AgentID+"/"+body.Service+body.Project, "fail", err.Error(), clientIP(r))
+		audit(u.Username, "", "commands.enqueue", body.AgentID+"/"+body.Service+"/"+body.Project, "fail", err.Error(), clientIP(r))
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	audit(u.Username, "", "commands.enqueue", cmd.ID, "ok", body.Action+" "+body.Service+body.Project, clientIP(r))
+	audit(u.Username, "", "commands.enqueue", cmd.ID, "ok", body.Action+" "+body.Service+"/"+body.Project, clientIP(r))
 	writeOK(w, map[string]any{"command": cmd})
 }
 

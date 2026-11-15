@@ -61,7 +61,7 @@
 	{#if portal.sites.length === 0}
 		<div class="card-body">
 			<div class="p-8 text-center text-[13px] text-ink-muted">
-				暂无网站接入。按 docs/portal-agent-protocol.md 在被管机起 portal-agent 或注册原生接口即可接入。
+				暂无网站接入。在被管机上部署 portal-agent 边车,或登记网站原生接口后,网站会自动出现在这里。
 			</div>
 		</div>
 	{:else}
