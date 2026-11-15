@@ -39,6 +39,13 @@
 		return site.containers.filter((c) => c.state === 'running').length;
 	}
 
+	// 容器状态过滤：全部站点共用一个过滤值，选项动态取当前出现过的状态集合
+	let stateFilter = $state('all');
+	const allStates = $derived([...new Set(portal.sites.flatMap((s) => s.containers.map((c) => c.state)))]);
+	function stateMatches(c: SiteOverview['containers'][number]): boolean {
+		return stateFilter === 'all' || c.state === stateFilter;
+	}
+
 	async function unregister(site: SiteOverview) {
 		if (
 			!(await askConfirm(
@@ -76,6 +83,14 @@
 {:else}
 	<div class="mb-3.5 flex items-center gap-2 text-[13px] text-ink-muted">
 		发布重建等批量操作在 <a class="text-primary hover:underline" href="/ops">命令与发布</a> 页。
+		{#if allStates.length > 0}
+			<select class="input ml-auto max-w-36 text-xs" bind:value={stateFilter} aria-label="按容器状态过滤">
+				<option value="all">全部状态</option>
+				{#each allStates as st (st)}
+					<option value={st}>{st}</option>
+				{/each}
+			</select>
+		{/if}
 	</div>
 	{#each portal.sites as site (site.name)}
 		<div class="card mt-3.5">
@@ -125,13 +140,16 @@
 						<tr><th>服务</th><th>所在机器</th><th>状态</th><th>详情</th><th>镜像</th><th></th></tr>
 					</thead>
 					<tbody>
-						{#each site.containers as c (c.portal_agent_id + c.id)}
+						{#if !site.containers.some(stateMatches)}
+							<tr><td colspan="6" class="py-4 text-center text-ink-muted">没有符合当前状态过滤的容器。</td></tr>
+						{/if}
+						{#each site.containers.filter(stateMatches) as c (c.portal_agent_id + c.id)}
 							<tr>
 								<td><b>{c.service || c.name}</b></td>
-								<td class="font-mono text-ink-2">{c.portal_agent_id}</td>
+								<td class="whitespace-nowrap font-mono text-ink-2">{c.portal_agent_id}</td>
 								<td><span class="badge {badgeCls(badgeOf(c.state))}">{c.state}</span></td>
 								<td class="text-ink-2">{c.status}</td>
-								<td class="font-mono text-ink-2">{c.image}</td>
+								<td class="font-mono text-ink-2"><span class="block max-w-[280px] truncate" title={c.image}>{c.image}</span></td>
 								<td class="text-right whitespace-nowrap">
 									{#if canOperate && site.agents.find((a) => a.portal_agent_id === c.portal_agent_id)?.online}
 										{#if c.state === 'running'}

@@ -35,6 +35,17 @@ body {
 	@apply bg-canvas text-ink font-sans text-sm antialiased;
 }
 
+/* 动效尊重系统「减弱动效」偏好 */
+@media (prefers-reduced-motion: reduce) {
+	*,
+	::before,
+	::after {
+		transition-duration: 0.01ms !important;
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+	}
+}
+
 /* ── 组件层 ── */
 @layer components {
 	.btn {
@@ -97,6 +108,12 @@ body {
 
 	.chip {
 		@apply inline-block rounded-md bg-neutral-100 px-2 py-0.5 text-xs text-ink-2;
+	}
+	a:focus-visible,
+	button:focus-visible,
+	select:focus-visible {
+		outline: 2px solid var(--color-primary);
+		outline-offset: 1px;
 	}
 	.page-title {
 		@apply text-[19px] font-semibold;

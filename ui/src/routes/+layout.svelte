@@ -53,7 +53,7 @@
 	<title>Ops Portal · 统一管理站</title>
 </svelte:head>
 
-<div class="flex min-h-screen">
+<div class="flex min-h-screen max-md:flex-col">
 	<aside
 		class="sticky top-0 flex h-screen w-54 flex-none flex-col overflow-x-auto bg-sidebar text-sidebar-text max-md:static max-md:h-auto max-md:w-full max-md:flex-row"
 	>
@@ -68,7 +68,7 @@
 				<small class="block text-[11px] font-normal">ops.yinghuoren.com</small>
 			</div>
 		</div>
-		<nav class="flex flex-1 flex-col gap-0.5 px-2.5 py-1.5 max-md:flex-row">
+		<nav class="flex min-w-0 flex-1 flex-col gap-0.5 px-2.5 py-1.5 max-md:flex-row max-md:overflow-x-auto">
 			{#each NAV as item (item.href ?? item.group)}
 				{#if visible(item)}
 					{#if item.group}
@@ -78,7 +78,8 @@
 					{:else}
 						<a
 							href={item.href}
-							class="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] hover:bg-sidebar-active hover:text-white
+							aria-current={page.url.pathname === item.href ? 'page' : undefined}
+							class="flex flex-none items-center gap-2.5 whitespace-nowrap rounded-lg px-2.5 py-2 text-[13.5px] hover:bg-sidebar-active hover:text-white
 								{page.url.pathname === item.href ? 'bg-primary font-medium text-white' : ''}"
 						>
 							<item.icon class="h-4 w-4 flex-none" />
