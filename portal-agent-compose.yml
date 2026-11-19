@@ -16,7 +16,7 @@ services:
       dockerfile: Dockerfile
       args:
         GO_VERSION: ${GO_VERSION:-1.26.11}
-        ALPINE_VERSION: ${ALPINE_VERSION:-3.24.1}
+        ALPINE_VERSION: ${ALPINE_VERSION:-3.24.4}
     container_name: ops-portal-agent-server
     restart: unless-stopped
     init: true
