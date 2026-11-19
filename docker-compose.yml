@@ -19,7 +19,7 @@ services:
       args:
         BUN_VERSION: ${BUN_VERSION:-1.3.14}
         GO_VERSION: ${GO_VERSION:-1.26.11}
-        ALPINE_VERSION: ${ALPINE_VERSION:-3.24.1}
+        ALPINE_VERSION: ${ALPINE_VERSION:-3.24.4}
         # 前端构建标识：部署时 `UI_VERSION=$(git rev-parse --short HEAD)` 注入
         UI_VERSION: ${UI_VERSION:-dev}
     restart: unless-stopped
@@ -84,7 +84,7 @@ services:
       context: ./services/portal-nginx
       dockerfile: Dockerfile
       args:
-        NGINX_VERSION: ${NGINX_VERSION:-1.30.4}
+        NGINX_VERSION: ${NGINX_VERSION:-1.30.6}
     environment:
       # 与 portal-backend 相同的四个透传头字段名（entrypoint 自带同值默认，
       # 空串回退默认）：改 .env 时 nginx 按新名转发、backend 按新名校验，
@@ -139,7 +139,7 @@ services:
       dockerfile: Dockerfile
       args:
         GO_VERSION: ${GO_VERSION:-1.26.11}
-        ALPINE_VERSION: ${ALPINE_VERSION:-3.24.1}
+        ALPINE_VERSION: ${ALPINE_VERSION:-3.24.4}
     init: true
     # 非 root（镜像内建 appuser uid/gid=1001）。OrbStack 的 docker.sock 属
     # root 组（实测 srw-rw---- root root），故组补 0；Linux 被管机 sock 属
